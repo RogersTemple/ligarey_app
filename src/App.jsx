@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Heart, X, MessageCircle, User, Flame, Music, 
   ChevronLeft, Send, Sparkles, Camera, Upload, 
-  Trash2, Check, ZoomIn, Info, Crown, Hand, Beer, QrCode 
+  Trash2, Check, ZoomIn, Info, Crown, Hand, Beer, QrCode,
+  Mail, Lock, ArrowRight, KeyRound
 } from 'lucide-react';
 
 // --- CONSTANTES Y MOCKS ---
@@ -16,29 +17,29 @@ const INTERESES_COMUNES = [
 const PERFILES_MOCK = [
   {
     id: 'm1',
-    name: 'Lucía',
+    name: 'Lucía (Ejemplo)',
     age: 24,
     photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=500&fit=crop',
     lookingFor: 'Alguien que se sepa todas las letras de Arctic Monkeys',
-    phrase: 'Viviendo el momento, un concierto a la vez. ✨',
+    phrase: 'Viviendo el momento, un concierto a la vez. ✨ (Perfil de prueba)',
     interests: ['Rock', 'Cerveza fría', 'Festivales'],
   },
   {
     id: 'm2',
-    name: 'Carlos',
+    name: 'Carlos (Ejemplo)',
     age: 27,
     photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=500&fit=crop',
     lookingFor: 'Gente para ir al escenario principal en 1 hora',
-    phrase: 'Buscando el mejor pogo de la noche.',
+    phrase: 'Buscando el mejor pogo de la noche. (Perfil de prueba)',
     interests: ['Indie', 'Pogo', 'Electrónica'],
   },
   {
     id: 'm3',
-    name: 'Elena',
+    name: 'Elena (Ejemplo)',
     age: 22,
     photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=500&fit=crop',
     lookingFor: 'Alguien para compartir glitter y baile',
-    phrase: 'Si hay techno, ahí me encuentras.',
+    phrase: 'Si hay techno, ahí me encuentras. (Perfil de prueba)',
     interests: ['Electrónica', 'Bailar', 'Moda'],
   }
 ];
@@ -47,7 +48,11 @@ const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1
 
 export default function App() {
   // --- ESTADOS ---
-  const [view, setView] = useState('welcome');
+  const [view, setView] = useState('welcome'); // welcome, auth, register, discover, matches, chat
+  const [authMode, setAuthMode] = useState('login'); // login, register, forgot
+  const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
     name: '',
@@ -63,10 +68,9 @@ export default function App() {
   const [matches, setMatches] = useState([]); 
   const [activeChatId, setActiveChatId] = useState(null);
   const [messages, setMessages] = useState({});
+  const [chatText, setChatText] = useState('');
   const [showMatchAnimation, setShowMatchAnimation] = useState(null); 
   const [showQRModal, setShowQRModal] = useState(false);
-  const [showTermsModal, setShowTermsModal] = useState(false);
-  const [termsAccepted, setTermsAccepted] = useState({ privacy: false, respect: false });
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -78,7 +82,22 @@ export default function App() {
     }
   }, [messages, view, activeChatId]);
 
-  // --- REGISTRO ---
+  // --- REGISTRO Y AUTH LOGIC ---
+  const handleAuthSubmit = (e) => {
+    e.preventDefault();
+    if (authMode === 'login') {
+      setView('discover'); // Simulamos que el login es correcto
+    } else if (authMode === 'register') {
+      setView('register'); // Pasa a crear el perfil visual
+    } else if (authMode === 'forgot') {
+      setRecoveryMessage('Te hemos enviado un enlace de recuperación a tu correo electrónico.');
+      setTimeout(() => {
+        setRecoveryMessage('');
+        setAuthMode('login');
+      }, 4000);
+    }
+  };
+
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -144,18 +163,139 @@ export default function App() {
           <Crown className="text-white w-16 h-16" />
         </div>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 mb-8">
         <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 tracking-tight pb-2 leading-tight">LigaRey</h1>
         <p className="text-stone-500 text-lg px-4 font-medium italic">El VIP de los festivales</p>
       </div>
-      <button onClick={() => setShowTermsModal(true)} className="w-full max-w-xs py-4 rounded-full bg-gradient-to-r from-rose-500 to-orange-400 text-white font-bold text-lg shadow-xl active:scale-95 transition-all">
-        Crear mi Perfil
+      <div className="w-full max-w-xs space-y-4">
+        <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-gradient-to-r from-rose-500 to-orange-400 text-white font-bold text-lg shadow-xl active:scale-95 transition-all">
+          Crear una cuenta
+        </button>
+        <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold text-lg shadow-sm active:scale-95 transition-all">
+          Iniciar Sesión
+        </button>
+      </div>
+    </div>
+  );
+
+  const AuthView = () => (
+    <div className="h-full flex flex-col p-6 bg-stone-50 overflow-y-auto">
+      <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 hover:text-stone-800 transition-colors mb-6">
+        <ChevronLeft className="w-8 h-8" />
       </button>
+
+      <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto">
+        <h2 className="text-4xl font-black text-stone-900 mb-2">
+          {authMode === 'login' && 'Bienvenido'}
+          {authMode === 'register' && 'Únete al VIP'}
+          {authMode === 'forgot' && 'Recuperar'}
+        </h2>
+        <p className="text-stone-500 mb-8">
+          {authMode === 'login' && 'Inicia sesión para ver quién está en la pista.'}
+          {authMode === 'register' && 'Crea tu cuenta gratis y conoce gente hoy.'}
+          {authMode === 'forgot' && 'Te enviaremos instrucciones a tu correo.'}
+        </p>
+
+        {recoveryMessage && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in fade-in">
+            <Check className="w-5 h-5" />
+            {recoveryMessage}
+          </div>
+        )}
+
+        <form onSubmit={handleAuthSubmit} className="space-y-4">
+          <div className="relative">
+            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+            <input 
+              type="email" 
+              required
+              placeholder="Correo electrónico" 
+              value={authForm.email}
+              onChange={e => setAuthForm({...authForm, email: e.target.value})}
+              className="w-full pl-12 pr-4 py-4 rounded-2xl border border-stone-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 transition-all outline-none"
+            />
+          </div>
+
+          {authMode !== 'forgot' && (
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+              <input 
+                type="password" 
+                required
+                placeholder="Contraseña" 
+                value={authForm.password}
+                onChange={e => setAuthForm({...authForm, password: e.target.value})}
+                className="w-full pl-12 pr-4 py-4 rounded-2xl border border-stone-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 transition-all outline-none"
+              />
+            </div>
+          )}
+
+          {authMode === 'register' && (
+            <div className="space-y-3 mt-6 p-4 bg-white rounded-2xl border border-stone-100 shadow-sm">
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  required
+                  checked={authForm.terms}
+                  onChange={e => setAuthForm({...authForm, terms: e.target.checked})}
+                  className="mt-1 w-5 h-5 accent-rose-500 shrink-0 cursor-pointer" 
+                />
+                <span className="text-sm text-stone-600 group-hover:text-stone-900 transition-colors">
+                  Acepto la <strong className="text-stone-800">Política de Privacidad</strong> y prometo mantener el respeto en la app.
+                </span>
+              </label>
+              <div className="h-px bg-stone-100 w-full my-2"></div>
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  checked={authForm.marketing}
+                  onChange={e => setAuthForm({...authForm, marketing: e.target.checked})}
+                  className="mt-1 w-5 h-5 accent-rose-500 shrink-0 cursor-pointer" 
+                />
+                <span className="text-sm text-stone-600 group-hover:text-stone-900 transition-colors">
+                  Quiero recibir descuentos, noticias de próximos festivales y eventos exclusivos. 🎟️
+                </span>
+              </label>
+            </div>
+          )}
+
+          {authMode === 'login' && (
+            <div className="text-right">
+              <button type="button" onClick={() => setAuthMode('forgot')} className="text-sm font-bold text-rose-500 hover:text-rose-600 transition-colors">
+                ¿Olvidaste tu contraseña?
+              </button>
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            className="w-full py-4 mt-6 rounded-full bg-stone-900 text-white font-bold text-lg shadow-xl active:scale-95 hover:bg-rose-500 transition-all flex items-center justify-center gap-2 group"
+          >
+            {authMode === 'login' && 'Entrar a la pista'}
+            {authMode === 'register' && 'Crear cuenta'}
+            {authMode === 'forgot' && 'Enviar enlace'}
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+          </button>
+        </form>
+
+        <div className="mt-8 text-center text-stone-500">
+          {authMode === 'login' ? (
+            <p>¿No tienes cuenta? <button onClick={() => setAuthMode('register')} className="font-bold text-rose-500 hover:underline">Regístrate</button></p>
+          ) : (
+            <p>¿Ya tienes cuenta? <button onClick={() => setAuthMode('login')} className="font-bold text-rose-500 hover:underline">Inicia Sesión</button></p>
+          )}
+        </div>
+      </div>
     </div>
   );
 
   const RegisterView = () => (
     <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-black text-stone-900">Completa tu perfil</h2>
+        <p className="text-stone-500 text-sm">Estos datos son los que verán los demás</p>
+      </div>
+
       {isCropping && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-6">
           <img src={tempPhoto} alt="Crop preview" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500" />
@@ -296,7 +436,6 @@ export default function App() {
 
   const ChatView = () => {
     const match = matches.find(m => m.id === activeChatId);
-    const [text, setText] = useState('');
     
     // Safety fallback if no match is selected but view is accessed
     if (!match) {
@@ -336,16 +475,16 @@ export default function App() {
           <div ref={chatEndRef} />
         </div>
         
-        <form onSubmit={e => { e.preventDefault(); sendMessage(text); setText(''); }} className="p-4 bg-white flex gap-2 border-t">
+        <form onSubmit={e => { e.preventDefault(); sendMessage(chatText); setChatText(''); }} className="p-4 bg-white flex gap-2 border-t">
           <input 
-            value={text} 
-            onChange={e => setText(e.target.value)} 
+            value={chatText} 
+            onChange={e => setChatText(e.target.value)} 
             placeholder="Escribe algo..." 
             className="flex-1 bg-stone-100 rounded-full px-6 py-3 focus:outline-none focus:bg-white border border-transparent focus:border-rose-300 transition-all" 
           />
           <button 
             type="submit" 
-            disabled={!text.trim()}
+            disabled={!chatText.trim()}
             className="w-12 h-12 bg-rose-500 disabled:bg-rose-300 rounded-full flex items-center justify-center text-white shadow-md active:scale-90 transition-transform"
           >
             <Send className="w-5 h-5 ml-1" />
@@ -358,16 +497,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center selection:bg-rose-500/20">
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
-        {view !== 'welcome' && (
+        {view !== 'welcome' && view !== 'auth' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-20 relative">
-            
-            {/* Logo alineado a la izquierda */}
             <div className="flex items-center">
               <Crown className="w-5 h-5 text-rose-500 mr-2" />
               <h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1>
             </div>
-
-            {/* Nuevo botón QR VIP global */}
             <button 
               onClick={() => setShowQRModal(true)}
               className="px-3 py-1.5 bg-gradient-to-r from-rose-100 to-orange-100 text-rose-600 rounded-full hover:shadow-md transition-all flex items-center gap-1.5 z-10 border border-rose-200 active:scale-95"
@@ -379,11 +514,12 @@ export default function App() {
         )}
         
         <div className="flex-1 overflow-hidden">
-          {view === 'welcome' && <WelcomeView />}
-          {view === 'register' && <RegisterView />}
-          {view === 'discover' && <DiscoverView />}
-          {view === 'matches' && <MatchesView />}
-          {view === 'chat' && <ChatView />}
+          {view === 'welcome' && WelcomeView()}
+          {view === 'auth' && AuthView()}
+          {view === 'register' && RegisterView()}
+          {view === 'discover' && DiscoverView()}
+          {view === 'matches' && MatchesView()}
+          {view === 'chat' && ChatView()}
         </div>
 
         {['discover', 'matches'].includes(view) && (
@@ -421,50 +557,6 @@ export default function App() {
                 />
               </div>
               <p className="text-xs text-stone-400 uppercase tracking-widest font-bold">Válido toda la noche</p>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Términos y Condiciones */}
-        {showTermsModal && (
-          <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
-            <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full relative shadow-2xl animate-in zoom-in duration-300">
-              <button onClick={() => setShowTermsModal(false)} className="absolute top-4 right-4 p-2 text-stone-400 hover:text-stone-600 transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-              <div className="mx-auto w-12 h-12 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mb-4">
-                <Crown className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-black text-stone-800 mb-4 text-center">Antes de entrar...</h3>
-              
-              <div className="space-y-4 text-sm text-stone-600 mb-6">
-                <label className="flex items-start gap-3 cursor-pointer p-2 rounded-xl hover:bg-stone-50 transition-colors">
-                  <input 
-                    type="checkbox" 
-                    className="mt-1 w-5 h-5 accent-rose-500 shrink-0" 
-                    checked={termsAccepted.privacy} 
-                    onChange={e => setTermsAccepted({...termsAccepted, privacy: e.target.checked})} 
-                  />
-                  <span>Acepto la <strong>Política de Privacidad</strong> y el tratamiento de mis datos para conectar con otras personas dentro del festival.</span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer p-2 rounded-xl hover:bg-stone-50 transition-colors">
-                  <input 
-                    type="checkbox" 
-                    className="mt-1 w-5 h-5 accent-rose-500 shrink-0" 
-                    checked={termsAccepted.respect} 
-                    onChange={e => setTermsAccepted({...termsAccepted, respect: e.target.checked})} 
-                  />
-                  <span>Me comprometo a mantener siempre el <strong>respeto y la buena educación</strong> con los demás usuarios de la comunidad.</span>
-                </label>
-              </div>
-
-              <button 
-                disabled={!termsAccepted.privacy || !termsAccepted.respect}
-                onClick={() => { setShowTermsModal(false); setView('register'); }} 
-                className="w-full py-4 rounded-full bg-rose-500 disabled:bg-stone-300 disabled:text-stone-500 text-white font-bold text-lg shadow-xl active:scale-95 transition-all"
-              >
-                Aceptar y Entrar
-              </button>
             </div>
           </div>
         )}
