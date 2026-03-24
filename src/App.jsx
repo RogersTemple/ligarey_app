@@ -3,7 +3,7 @@ import {
   Heart, X, MessageCircle, User, Flame, Music, 
   ChevronLeft, Send, Sparkles, Camera, Upload, 
   Trash2, Check, ZoomIn, Info, Crown, Hand, Beer, QrCode,
-  Mail, Lock, ArrowRight, KeyRound, LogOut, AlertCircle, Bell, BellOff, Settings, Eraser, UserX, RefreshCcw
+  Mail, Lock, ArrowRight, KeyRound, LogOut, AlertCircle, Bell, BellOff, Settings, Eraser, UserX, RefreshCcw, Eye, EyeOff
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE FIREBASE ---
@@ -15,8 +15,7 @@ import {
   signInWithCustomToken,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  deleteUser,
-  signInAnonymously
+  deleteUser
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -31,8 +30,8 @@ import {
   query
 } from 'firebase/firestore';
 
-// FIJAMOS LA CONFIGURACIÓN PARA QUE SIEMPRE USE TU FIREBASE REAL
-const firebaseConfig = {
+// Inicialización segura con variables de entorno
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
   authDomain: "ligarey.firebaseapp.com",
   projectId: "ligarey",
@@ -44,7 +43,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'ligarey-oficial-app'; // Un ID fijo para todos los entornos
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ligarey-v4';
 
 // --- CONSTANTES ---
 const INTERESES_COMUNES = [
@@ -62,23 +61,35 @@ const PERFILES_MOCK = [
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
 
 export default function App() {
+  // Estados de la App
   const [view, setView] = useState('welcome');
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
-  const [dbError, setDbError] = useState(''); // CHIVATO DE ERRORES FIREBASE
+  const [showPassword, setShowPassword] = useState(false); // Estado para ver la contraseña
+  
+  // Estado para los checkboxes legales (Solo registro)
+  const [registerTerms, setRegisterTerms] = useState({
+    privacy: false,
+    conduct: false,
+    newsletter: false
+  });
+
   const [user, setUser] = useState(null); 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
+  // Perfil y Ajustes
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true 
   });
   const [photoError, setPhotoError] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState(''); 
+  const [showSettings, setShowSettings] = useState(false); // Estado para el modal de Ajustes
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Estados de Discover y Mensajería
   const [profiles, setProfiles] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showMatchAnimation, setShowMatchAnimation] = useState(null);
@@ -96,21 +107,38 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState('');
 
+  // Refs de la App blindadas
   const sessionStart = useRef(new Date().toISOString());
   const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null); 
 
+  // Rutas de Firestore
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
 
+  // Auto-scroll en el chat
   useEffect(() => {
-    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chatMessages, view]);
 
   // --- ARRANQUE Y AUTENTICACIÓN ---
   useEffect(() => {
+    const initApp = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        }
+      } catch (e) { 
+        console.error("Auth error silent fail"); 
+      }
+    };
+
+    initApp();
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -119,6 +147,8 @@ export default function App() {
           if (userDoc.exists()) {
             const data = userDoc.data();
             setMyProfile(prev => ({ ...prev, ...data }));
+            
+            // Bloqueo si el perfil es nuevo o incompleto
             if (!data.name || !data.photo || !data.phrase || !data.lookingFor) {
               setView('register');
             } else if (view === 'welcome' || view === 'auth') {
@@ -158,7 +188,7 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Error matches:", err));
+    }, (err) => console.error("Snapshot error avoided"));
 
     const unsubChats = onSnapshot(chatsCol, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -176,17 +206,14 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Error chats:", err));
+    }, (err) => console.error("Snapshot error avoided"));
 
     return () => { unsubMatches(); unsubChats(); };
   }, [user, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR DATOS ---
+  // --- CARGAR DATOS (Pista y Chats) ---
   const fetchData = async () => {
     if (!user) return;
-    setDbError(''); // Limpiamos el error previo al recargar
-    
-    let uniqueIds = [];
     try {
       const matchesSnap = await getDocs(matchesCol);
       const chatIds = [];
@@ -196,39 +223,26 @@ export default function App() {
         if (data.to === user.uid) chatIds.push({ id: data.from, name: data.fromName });
       });
       
-      uniqueIds = Array.from(new Map(chatIds.map(item => [item.id, item])).values());
+      const uniqueIds = Array.from(new Map(chatIds.map(item => [item.id, item])).values());
       const enriched = await Promise.all(uniqueIds.map(async (c) => {
         const uDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', c.id));
         return uDoc.exists() ? { ...c, ...uDoc.data() } : c;
       }));
       setActiveChats(enriched);
-    } catch (e) {
-      console.error("Error matches:", e);
-      setDbError("Permisos denegados al cargar Chats. Revisa Firebase Rules.");
-    }
 
-    if (view === 'discover') {
-      try {
+      if (view === 'discover') {
         const usersSnap = await getDocs(usersCol);
         const matchedSet = new Set(uniqueIds.map(c => c.id));
         const list = [];
-        
         usersSnap.forEach(d => { 
           if (d.id !== user.uid && d.data().name) {
             list.push({ id: d.id, ...d.data(), isAlreadyMatched: matchedSet.has(d.id) }); 
           }
         });
         
-        // Mezclamos perfiles reales con los de mock
-        const mockNoMatch = PERFILES_MOCK.filter(m => !matchedSet.has(m.id));
-        setProfiles([...list, ...mockNoMatch]);
-        
-      } catch (e) {
-        console.error("Error usuarios:", e);
-        setDbError("Permisos denegados en Firebase. Solo verás ejemplos.");
-        setProfiles(PERFILES_MOCK);
+        setProfiles(list.length > 0 ? list : PERFILES_MOCK);
       }
-    }
+    } catch (e) { console.error("Fetch error avoided"); }
   };
 
   useEffect(() => {
@@ -254,29 +268,41 @@ export default function App() {
     return () => unsubChat();
   }, [user, activeChatUser]);
 
-  // --- FUNCIONES ---
+  // --- FUNCIONES DE AUTH Y PERFIL ---
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
+    
+    // Validación de checkboxes si es registro
+    if (authMode === 'register') {
+      if (!registerTerms.privacy || !registerTerms.conduct) {
+        setAuthError('Debes aceptar la política de privacidad y las normas de conducta para poder registrarte.');
+        return;
+      }
+    }
+
     setIsAuthLoading(true);
     try {
       if (authMode === 'login') {
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
       } else {
         const res = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
+        // Guardamos también sus preferencias de registro
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', res.user.uid), { 
-          email: authForm.email, fechaRegistro: new Date().toISOString(), notificationsEnabled: true 
+          email: authForm.email, 
+          fechaRegistro: new Date().toISOString(), 
+          notificationsEnabled: true,
+          newsletterAccepted: registerTerms.newsletter
         });
         setView('register');
       }
     } catch (error) {
       if (error?.code === 'auth/email-already-in-use') setAuthError('Este email ya está en uso.');
-      else if (error?.code === 'auth/weak-password') setAuthError('Contraseña mínima 6 caracteres.');
+      else if (error?.code === 'auth/weak-password') setAuthError('La contraseña debe tener mínimo 6 caracteres.');
       else setAuthError('Error: Revisa tus datos o si el email existe.');
     } finally { setIsAuthLoading(false); }
   };
 
-  // --- NUOVA FUNZIONE PER COMPRIMERE LA FOTO (Adatta immagini grandi al limite di 1MB) ---
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -286,22 +312,15 @@ export default function App() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        // Aumentiamo la risoluzione a 800x800 per una migliore qualità visiva
         const MAX_WIDTH = 800;
         const MAX_HEIGHT = 800;
         let width = img.width;
         let height = img.height;
 
         if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
+          if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
         } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
+          if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
         }
 
         canvas.width = width;
@@ -309,12 +328,9 @@ export default function App() {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Comprime l'immagine partendo da qualità 0.85
         let quality = 0.85;
         let compressedBase64 = canvas.toDataURL('image/jpeg', quality);
 
-        // Firebase Firestore ha un limite rigoroso di 1MB per documento.
-        // Se la stringa supera gli 800.000 caratteri (~800KB), riduciamo la qualità dinamicamente.
         while (compressedBase64.length > 800000 && quality > 0.3) {
           quality -= 0.1;
           compressedBase64 = canvas.toDataURL('image/jpeg', quality);
@@ -341,11 +357,7 @@ export default function App() {
       setSaveMessage('¡Perfil guardado!');
       setTimeout(() => setSaveMessage(''), 2000);
       return true;
-    } catch (e) { 
-      console.error(e);
-      setPhotoError('Hubo un error al guardar los datos de tu perfil.'); 
-      return false; 
-    }
+    } catch (e) { setPhotoError('Error al guardar. Asegúrate de que la foto no sea gigante.'); return false; }
     finally { setIsSavingProfile(false); }
   };
 
@@ -373,6 +385,7 @@ export default function App() {
     await signOut(auth);
     setUser(null);
     setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true });
+    setShowSettings(false);
     setView('welcome');
   };
 
@@ -381,7 +394,19 @@ export default function App() {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
       await deleteUser(auth.currentUser);
       handleLogout();
-    } catch (e) { setAuthError('Cierra sesión y entra de nuevo para poder borrar la cuenta.'); }
+    } catch (e) { 
+      setShowDeleteConfirm(false);
+      setShowSettings(false);
+      setPhotoError('Por seguridad, cierra sesión y vuelve a entrar para poder borrar tu cuenta.'); 
+    }
+  };
+
+  const toggleNotifications = async () => {
+    const newVal = !myProfile.notificationsEnabled;
+    setMyProfile({...myProfile, notificationsEnabled: newVal});
+    if (user) {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid), { notificationsEnabled: newVal }, { merge: true });
+    }
   };
 
   const handleMatchAction = async (type) => {
@@ -407,11 +432,13 @@ export default function App() {
     }, type === 'dislike' ? 300 : 1500);
   };
 
+  // --- CARGANDO ---
   if (isInitializing) return <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /><p className="text-stone-400 font-black text-[10px] tracking-[0.2em] animate-pulse">CARGANDO...</p></div>;
 
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       
+      {/* TOAST FLOTANTE */}
       {newNotificationToast && (
         <div onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] w-full max-w-[340px] px-4 animate-in slide-in-from-top cursor-pointer">
           <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
@@ -423,6 +450,7 @@ export default function App() {
         </div>
       )}
 
+      {/* INSPECTOR VIP */}
       {showInspector && (
         <div className="absolute inset-0 z-[500] bg-stone-900/95 backdrop-blur-xl animate-in slide-in-from-bottom flex flex-col p-6">
           <button onClick={() => setShowInspector(null)} className="self-end p-2 bg-white/10 rounded-full text-white mb-6"><X className="w-6 h-6" /></button>
@@ -440,8 +468,42 @@ export default function App() {
         </div>
       )}
 
+      {/* MODAL AJUSTES Y SEGURIDAD */}
+      {showSettings && (
+        <div className="absolute inset-0 z-[500] bg-black/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full relative shadow-2xl animate-in zoom-in">
+            <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-800 transition-colors"><X className="w-6 h-6" /></button>
+            <h3 className="text-2xl font-black text-stone-800 mb-6 tracking-tighter uppercase font-black">Ajustes VIP</h3>
+            
+            <div className="space-y-6">
+              {/* Notificaciones */}
+              <div className="flex items-center justify-between bg-stone-50 p-4 rounded-2xl border border-stone-100">
+                <div>
+                  <p className="font-bold text-stone-800 leading-none mb-1">Notificaciones</p>
+                  <p className="text-[10px] text-stone-500 uppercase tracking-widest">Avisos y mensajes</p>
+                </div>
+                <button onClick={toggleNotifications} className={`w-12 h-6 rounded-full transition-colors relative ${myProfile.notificationsEnabled ? 'bg-rose-500' : 'bg-stone-300'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${myProfile.notificationsEnabled ? 'translate-x-7' : 'translate-x-1'}`}></div>
+                </button>
+              </div>
+
+              {/* Botones de acción */}
+              <div className="pt-4 border-t border-stone-100 space-y-3">
+                <button onClick={handleLogout} className="w-full py-3 rounded-full bg-stone-100 text-stone-800 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
+                  <LogOut className="w-4 h-4" /> Cerrar Sesión
+                </button>
+                <button onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }} className="w-full py-3 rounded-full bg-red-50 text-red-500 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-red-100">
+                  <Trash2 className="w-4 h-4" /> Borrar mi Cuenta
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
+        {/* CABECERA GENERAL */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
             <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
@@ -454,36 +516,73 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative">
           
+          {/* WELCOME */}
           {view === 'welcome' && (
             <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
               <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
+              <p className="text-stone-400 font-bold uppercase tracking-widest text-[10px]">La app oficial del festival</p>
               <div className="w-full max-w-xs space-y-4 pt-4">
-                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta</button>
+                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta gratis</button>
                 <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all">Ya tengo cuenta</button>
               </div>
             </div>
           )}
 
+          {/* AUTH */}
           {view === 'auth' && (
-            <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right">
+            <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right overflow-y-auto">
               <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
               <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? 'Hola' : 'Registro'}</h2>
-              {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4" /> {authError}</p>}
+              {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /> {authError}</p>}
               <form onSubmit={handleAuthSubmit} className="space-y-4">
                 <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
-                <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
-                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 flex items-center justify-center transition-all">
-                   {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'ENTRAR' : 'REGISTRARSE')}
+                
+                <div className="relative">
+                  <input type={showPassword ? "text" : "password"} required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 pr-16 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 font-bold text-[10px] uppercase tracking-widest p-2">
+                    {showPassword ? 'Ocultar' : 'Ver'}
+                  </button>
+                </div>
+
+                {/* CASILLAS DE REGISTRO OBLIGATORIAS Y OPCIONALES */}
+                {authMode === 'register' && (
+                  <div className="space-y-3 pt-2 pb-4 text-left">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" checked={registerTerms.privacy} onChange={e => setRegisterTerms({...registerTerms, privacy: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
+                      <span className="text-[10px] text-stone-500 leading-tight">He leído y acepto la Política de Privacidad y el tratamiento de mis datos personales. <span className="text-rose-500 font-bold">*</span></span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" checked={registerTerms.conduct} onChange={e => setRegisterTerms({...registerTerms, conduct: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
+                      <span className="text-[10px] text-stone-500 leading-tight">Me comprometo a estar abierto a conocer gente con respeto, educación y buen rollo. <span className="text-rose-500 font-bold">*</span></span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" checked={registerTerms.newsletter} onChange={e => setRegisterTerms({...registerTerms, newsletter: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
+                      <span className="text-[10px] text-stone-500 leading-tight">Acepto recibir correos informativos sobre novedades y futuros eventos exclusivos.</span>
+                    </label>
+                  </div>
+                )}
+
+                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 flex items-center justify-center transition-all mt-2">
+                   {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'ENTRAR' : 'CREAR CUENTA VIP')}
                 </button>
               </form>
-              <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-6 text-stone-500 text-xs font-bold uppercase tracking-widest leading-none">{authMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Entra'}</button>
+              <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="w-full mt-6 text-stone-500 text-xs font-bold uppercase tracking-widest leading-none">
+                {authMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Entra'}
+              </button>
             </div>
           )}
 
+          {/* PERFIL Y AJUSTES */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
-              <h2 className="text-2xl font-black text-center mb-2 uppercase tracking-tighter">Mi Perfil VIP</h2>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-black uppercase tracking-tighter">Mi Perfil VIP</h2>
+                <button onClick={() => setShowSettings(true)} className="p-2 bg-stone-200 rounded-full text-stone-600 hover:bg-stone-300 transition-colors active:scale-95 shadow-inner">
+                  <Settings className="w-5 h-5" />
+                </button>
+              </div>
+              
               <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner">
                 <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-400'}`}>DATOS</button>
                 <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-400'}`}>PREVIA</button>
@@ -491,12 +590,12 @@ export default function App() {
               
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
+                  {photoError && <p className="text-red-500 text-[10px] font-bold text-center bg-red-50 p-2 rounded-lg border border-red-100">{photoError}</p>}
                   <div className="flex flex-col items-center">
                     <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-colors">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-                    {photoError && <p className="text-red-500 text-[10px] font-bold mt-2 text-center bg-red-50 p-2 rounded-lg border border-red-100">{photoError}</p>}
                   </div>
                   <input type="text" placeholder="Tu nombre (Obligatorio)" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
                   <input type="text" placeholder="Frase favorita (Obligatorio)" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm italic" />
@@ -509,10 +608,9 @@ export default function App() {
                       }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
                     ))}
                   </div>
-                  <div className="pt-6 space-y-3">
-                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs">{saveMessage}</p>}
+                  <div className="pt-6">
+                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs mb-3">{saveMessage}</p>}
                     <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">Guardar Cambios</button>
-                    <button onClick={handleLogout} className="w-full text-stone-400 font-black text-[10px] uppercase py-2 active:opacity-50">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
@@ -526,6 +624,7 @@ export default function App() {
             </div>
           )}
 
+          {/* DISCOVER */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in fade-in">
               {showMatchAnimation && (
@@ -536,15 +635,6 @@ export default function App() {
                   </div>
                 </div>
               )}
-
-              {/* CHIVATO DE ERRORES FIREBASE */}
-              {dbError && (
-                <div className="absolute top-4 left-4 right-4 z-[100] bg-red-500 text-white p-3 rounded-2xl shadow-xl flex items-center gap-2 text-[10px] font-bold uppercase animate-in slide-in-from-top">
-                  <AlertCircle className="w-5 h-5 shrink-0" />
-                  <p>{dbError}</p>
-                </div>
-              )}
-
               <div className={`flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 transition-all duration-500 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-emerald-500 shadow-emerald-500/20' : 'border-stone-200'}`}>
                 {profiles[currentIndex] ? (
                   <>
@@ -565,7 +655,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-stone-400 p-8 text-center gap-4 opacity-40">
                     <Sparkles className="w-12 h-12" />
-                    <p className="font-bold italic">Nadie nuevo por la pista...</p>
+                    <p className="font-bold italic">Buscando gente nueva...</p>
                     <button onClick={fetchData} className="text-rose-500 uppercase font-black text-xs border-b-2 border-rose-500 pb-1">Refrescar radar</button>
                   </div>
                 )}
@@ -653,14 +743,17 @@ export default function App() {
           </div>
         )}
 
-        {/* MODAL ELIMINACIÓN DE CUENTA */}
+        {/* MODAL ELIMINACIÓN DE CUENTA CONFIRMACIÓN REDUCIDA */}
         {showDeleteConfirm && (
           <div className="absolute inset-0 z-[600] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl">
               <div className="mx-auto w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4"><AlertCircle className="w-8 h-8" /></div>
               <h3 className="text-2xl font-black text-stone-800 mb-2 uppercase leading-none">¿Eliminar cuenta?</h3>
               <p className="text-stone-500 mb-8 text-sm italic">Tu cuenta desaparecerá para siempre.</p>
-              <div className="space-y-3"><button onClick={() => { deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid)); deleteUser(user); handleLogout(); }} className="w-full py-4 rounded-full bg-red-500 text-white font-bold text-lg active:scale-95 transition-all">SÍ, ELIMINAR</button><button onClick={() => setShowDeleteConfirm(false)} className="w-full py-4 rounded-full bg-stone-100 text-stone-800 font-bold text-lg active:scale-95 transition-all">CANCELAR</button></div>
+              <div className="space-y-3">
+                <button onClick={handleDeleteAccount} className="w-full py-4 rounded-full bg-red-500 text-white font-bold text-lg active:scale-95 transition-all">SÍ, ELIMINAR</button>
+                <button onClick={() => setShowDeleteConfirm(false)} className="w-full py-4 rounded-full bg-stone-100 text-stone-800 font-bold text-lg active:scale-95 transition-all">CANCELAR</button>
+              </div>
             </div>
           </div>
         )}
