@@ -236,7 +236,7 @@ export default function App() {
 
   // --- NUEVO: FUNCIÓN EXPLÍCITA DE GUARDADO ---
   const saveProfileOnly = async () => {
-    if (!currentUser) return;
+    if (!currentUser) return false;
     setIsSavingProfile(true);
     setPhotoError('');
     
@@ -252,11 +252,21 @@ export default function App() {
       
       setSaveMessage('¡Perfil guardado con éxito!');
       setTimeout(() => setSaveMessage(''), 3000);
+      return true; // <-- Devuelve true si todo va bien
     } catch (error) {
       console.error("Error al guardar:", error);
       setPhotoError('Error al guardar en la nube. Puede que la foto sea muy grande.');
+      return false; // <-- Devuelve false si falla
     } finally {
       setIsSavingProfile(false);
+    }
+  };
+
+  // --- LA FUNCIÓN PERDIDA QUE SALVA LA PANTALLA BLANCA ---
+  const handleGoToPista = async () => {
+    const exito = await saveProfileOnly();
+    if (exito) {
+      setView('discover');
     }
   };
 
