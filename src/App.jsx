@@ -33,7 +33,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// Forzamos persistencia
+// Forzamos persistencia para que no olvide la sesión al cerrar el navegador o refrescar
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- CONSTANTES ---
@@ -77,21 +77,21 @@ export default function App() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState(''); 
 
-  // Estado para los usuarios reales que aparecen en la pista
   const [profiles, setProfiles] = useState(PERFILES_MOCK);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showQRModal, setShowQRModal] = useState(false);
 
   const fileInputRef = useRef(null);
 
-  // --- LÓGICA DE INICIO Y PERSISTENCIA ---
+  // --- LÓGICA DE INICIO (FIJADA PARA EVITAR PANTALLA BLANCA) ---
   useEffect(() => {
+    // Temporizador de seguridad para que la app cargue sí o sí en 5 segundos
     const safetyTimer = setTimeout(() => setIsInitializing(false), 5000);
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         try {
-          // Buscamos al usuario en la colección pública de perfiles
           const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
@@ -102,19 +102,31 @@ export default function App() {
               lookingFor: data.lookingFor || '',
               interests: data.interests || []
             });
-            if (data.name && view === 'welcome') setView('discover');
+            // Si ya tiene perfil, lo mandamos a la pista automáticamente al arrancar
+            if (data.name) setView('discover');
+            else setView('register');
+          } else {
+            setView('register');
           }
-        } catch (e) { console.error("Error al cargar perfil inicial:", e); }
+        } catch (e) { 
+          console.error("Error cargando perfil:", e);
+          setView('register');
+        }
       } else {
         setCurrentUser(null);
+        setView('welcome');
       }
       clearTimeout(safetyTimer);
       setIsInitializing(false);
     });
-    return () => { unsubscribe(); clearTimeout(safetyTimer); };
-  }, [view]);
 
-  // --- CARGAR USUARIOS REALES EN LA PISTA ---
+    return () => {
+      unsubscribe();
+      clearTimeout(safetyTimer);
+    };
+  }, []); // [] para que solo se ejecute una vez al cargar la web
+
+  // --- CARGAR USUARIOS REALES ---
   useEffect(() => {
     if (view === 'discover' && currentUser) {
       const fetchRealUsers = async () => {
@@ -122,20 +134,13 @@ export default function App() {
           const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'usuarios'));
           const realUsers = [];
           querySnapshot.forEach((doc) => {
-            // No nos mostramos a nosotros mismos en la pista
             if (doc.id !== currentUser.uid) {
               const data = doc.data();
-              // Solo mostramos gente que al menos tenga nombre y foto (para que la pista sea bonita)
-              if (data.name) {
-                realUsers.push({ id: doc.id, ...data });
-              }
+              if (data.name) realUsers.push({ id: doc.id, ...data });
             }
           });
-          // Mezclamos reales con mocks si hay pocos, o solo reales si hay muchos
-          setProfiles(realUsers.length > 0 ? realUsers : PERFILES_MOCK);
-        } catch (e) {
-          console.error("Error cargando usuarios:", e);
-        }
+          if (realUsers.length > 0) setProfiles(realUsers);
+        } catch (e) { console.error("Error cargando pista:", e); }
       };
       fetchRealUsers();
     }
@@ -149,10 +154,9 @@ export default function App() {
     try {
       if (authMode === 'login') {
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
-        setView('discover');
+        // El useEffect de arriba detectará el login y cambiará la vista
       } else if (authMode === 'register') {
         const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
-        // Creamos el documento inicial en la colección pública
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', userCredential.user.uid), {
           email: authForm.email,
           fechaRegistro: new Date().toISOString()
@@ -161,7 +165,8 @@ export default function App() {
       }
     } catch (error) {
       setAuthError('Error de acceso. Revisa tus datos.');
-    } finally { setIsAuthLoading(false); }
+      setIsAuthLoading(false);
+    }
   };
 
   const saveProfileData = async () => {
@@ -169,7 +174,6 @@ export default function App() {
     setIsSavingProfile(true);
     setPhotoError('');
     try {
-      // Guardamos en la ruta pública para que otros nos vean
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid), {
         name: myProfile.name,
         photo: myProfile.photo,
@@ -177,24 +181,32 @@ export default function App() {
         lookingFor: myProfile.lookingFor,
         interests: myProfile.interests
       }, { merge: true });
-      setSaveMessage('¡Guardado!');
-      setTimeout(() => setSaveMessage(''), 2000);
+      setSaveMessage('¡Perfil guardado!');
+      setTimeout(() => setSaveMessage(''), 3000);
       return true;
-    } catch (e) { setPhotoError('Error al guardar en la nube.'); return false; }
-    finally { setIsSavingProfile(false); }
+    } catch (e) { 
+      setPhotoError('Error al guardar. La foto puede ser muy grande.'); 
+      return false; 
+    } finally { setIsSavingProfile(false); }
   };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // REINICIO TOTAL DE ESTADOS
       setCurrentUser(null);
       setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
       setAuthForm({ email: '', password: '' });
-      setAuthError('');
-      setCurrentIndex(0);
       setView('welcome');
     } catch (e) { console.error("Error al salir:", e); }
+  };
+
+  const toggleInterest = (interest) => {
+    setMyProfile(prev => {
+      const interests = prev.interests.includes(interest)
+        ? prev.interests.filter(i => i !== interest)
+        : prev.interests.length < 5 ? [...prev.interests, interest] : prev.interests;
+      return { ...prev, interests };
+    });
   };
 
   const handleGoToPista = async () => {
@@ -203,10 +215,12 @@ export default function App() {
     if (ok) setView('discover');
   };
 
+  // --- PANTALLA DE CARGA ---
   if (isInitializing) {
     return (
-      <div className="min-h-screen bg-stone-900 flex justify-center items-center">
+      <div className="min-h-screen bg-stone-900 flex flex-col justify-center items-center gap-4">
         <Crown className="w-16 h-16 text-rose-500 animate-pulse" />
+        <p className="text-stone-400 font-bold tracking-widest text-xs uppercase">Cargando LigaRey...</p>
       </div>
     );
   }
@@ -215,41 +229,49 @@ export default function App() {
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
+        {/* Cabecera */}
         {view !== 'welcome' && view !== 'auth' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
-            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1></div>
-            <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> DESCUENTO REY</button>
+            <div className="flex items-center gap-2">
+              <Crown className="w-5 h-5 text-rose-500" />
+              <h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1>
+            </div>
+            <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1">
+              <QrCode className="w-3 h-3" /> DESCUENTO REY
+            </button>
           </div>
         )}
 
         <div className="flex-1 overflow-hidden relative">
           
+          {/* BIENVENIDA */}
           {view === 'welcome' && (
-            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50">
-              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-in zoom-in duration-500">
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50 animate-in fade-in duration-500">
+              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
                 <Crown className="text-white w-16 h-16" />
               </div>
               <div className="space-y-2">
-                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2 leading-none">LigaRey</h1>
+                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2">LigaRey</h1>
                 <p className="text-stone-500 italic font-medium">Encuentra nuevos amigos</p>
               </div>
-              <div className="w-full max-w-xs space-y-4 pt-4">
+              <div className="w-full max-w-xs space-y-4">
                 <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear una cuenta</button>
                 <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold active:scale-95 transition-all">Ya tengo cuenta</button>
               </div>
             </div>
           )}
 
+          {/* AUTH */}
           {view === 'auth' && (
-            <div className="h-full flex flex-col p-6 bg-stone-50">
-              <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
+            <div className="h-full flex flex-col p-6 bg-stone-50 animate-in slide-in-from-right duration-300">
+              <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
               <div className="max-w-sm w-full mx-auto">
                 <h2 className="text-4xl font-black text-stone-900 mb-2 tracking-tighter">{authMode === 'login' ? 'Bienvenido' : 'Únete al VIP'}</h2>
-                <p className="text-stone-500 mb-8 text-sm">{authMode === 'login' ? 'Entra para ver quién está en la pista.' : 'Regístrate gratis en 10 segundos.'}</p>
+                <p className="text-stone-500 mb-8 text-sm">{authMode === 'login' ? 'Inicia sesión para entrar en la pista.' : 'Regístrate gratis y conoce gente hoy.'}</p>
                 {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100">{authError}</p>}
                 <form onSubmit={handleAuthSubmit} className="space-y-4">
-                  <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors" />
-                  <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors" />
+                  <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
+                  <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
                   <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold flex justify-center items-center h-14 shadow-lg active:scale-95 transition-all">
                     {isAuthLoading ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'Entrar' : 'Registrarse')}
                   </button>
@@ -259,6 +281,7 @@ export default function App() {
             </div>
           )}
 
+          {/* PERFIL */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Mi Perfil</h2>
@@ -269,9 +292,9 @@ export default function App() {
               </div>
 
               {profileMode === 'edit' ? (
-                <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="space-y-6">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-all">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
@@ -280,9 +303,9 @@ export default function App() {
                         const reader = new FileReader();
                         reader.onloadend = () => { setTempPhoto(reader.result); setIsCropping(true); };
                         reader.readAsDataURL(file);
-                      } else { setPhotoError('Máximo 400KB.'); }
+                      } else { setPhotoError('La foto pesa demasiado. Máximo 400KB.'); }
                     }} className="hidden" />
-                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Sube una foto (Máx 400KB)'}</p>
+                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Foto máx 400KB'}</p>
                   </div>
 
                   <div className="space-y-4">
@@ -299,14 +322,14 @@ export default function App() {
 
                   <div className="pt-6 space-y-4">
                     {saveMessage && <p className="text-green-600 text-center font-bold text-xs bg-green-50 py-2 rounded-lg border border-green-100">{saveMessage}</p>}
-                    <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all uppercase tracking-widest text-xs">
-                      {isSavingProfile ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Guardar Perfil'}
+                    <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all text-xs">
+                      {isSavingProfile ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR PERFIL'}
                     </button>
                     <button onClick={handleLogout} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
+                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200">
                   {myProfile.photo ? <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" /> : <div className="absolute inset-0 flex items-center justify-center text-stone-400"><Camera className="w-12 h-12" /></div>}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
@@ -322,19 +345,20 @@ export default function App() {
             </div>
           )}
 
+          {/* DISCOVER */}
           {view === 'discover' && profiles.length > 0 && (
-            <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in slide-in-from-bottom duration-500">
-              <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200 group">
-                <img src={profiles[currentIndex].photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+            <div className="h-full flex flex-col p-4 bg-stone-100 relative">
+              <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
+                <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                 <div className="absolute bottom-0 p-6 text-white w-full">
                   <div className="flex items-center gap-2 mb-1">
-                    <h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex].name}</h2>
-                    {profiles[currentIndex].id.startsWith('m') && <span className="bg-white/20 px-2 py-0.5 rounded text-[8px] uppercase font-bold">Bot</span>}
+                    <h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>
+                    {profiles[currentIndex]?.id?.startsWith('m') && <span className="bg-white/20 px-2 py-0.5 rounded text-[8px] uppercase font-bold">Bot</span>}
                   </div>
-                  <p className="text-rose-300 font-bold mb-4 italic leading-tight">"{profiles[currentIndex].phrase || 'Sin frase...'}"</p>
+                  <p className="text-rose-300 font-bold mb-4 italic leading-tight">"{profiles[currentIndex]?.phrase || 'Hola!'}"</p>
                   <div className="flex flex-wrap gap-2">
-                    {(profiles[currentIndex].interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-wider">{i}</span>)}
+                    {(profiles[currentIndex]?.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold">{i}</span>)}
                   </div>
                 </div>
               </div>
@@ -347,6 +371,7 @@ export default function App() {
           )}
         </div>
 
+        {/* Navegación Inferior */}
         {['discover', 'register'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
@@ -355,6 +380,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Modal Recorte */}
         {isCropping && (
           <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in">
             <img src={tempPhoto} alt="Crop" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500 shadow-2xl" />
@@ -365,6 +391,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Modal QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
@@ -381,12 +408,3 @@ export default function App() {
     </div>
   );
 }
-
-const toggleInterest = (interest, setMyProfile) => {
-  setMyProfile(prev => {
-    const interests = prev.interests.includes(interest)
-      ? prev.interests.filter(i => i !== interest)
-      : prev.interests.length < 5 ? [...prev.interests, interest] : prev.interests;
-    return { ...prev, interests };
-  });
-};
