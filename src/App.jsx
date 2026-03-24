@@ -24,10 +24,10 @@ import {
   setDoc, 
   getDoc, 
   collection,
-  getDocs
+  getDocs,
+  addDoc
 } from 'firebase/firestore';
 
-// He vuelto a poner tus credenciales manuales para que funcione en tu ordenador local
 const firebaseConfig = {
   apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
   authDomain: "ligarey.firebaseapp.com",
@@ -42,7 +42,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Forzamos persistencia para que no olvide la sesión al refrescar
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- CONSTANTES ---
@@ -86,20 +85,19 @@ export default function App() {
 
   const [profiles, setProfiles] = useState(PERFILES_MOCK);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [matches, setMatches] = useState([]); 
+  const [showMatchAnimation, setShowMatchAnimation] = useState(null);
   const [showQRModal, setShowQRModal] = useState(false);
 
   const fileInputRef = useRef(null);
 
   // --- LÓGICA DE INICIO ---
   useEffect(() => {
-    // Si en 6 segundos no ha cargado, forzamos la entrada para evitar pantalla blanca
     const timer = setTimeout(() => setIsInitializing(false), 6000);
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         try {
-          // Buscamos tu perfil en la base de datos
           const userDoc = await getDoc(doc(db, 'usuarios', user.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
@@ -110,8 +108,7 @@ export default function App() {
               lookingFor: data.lookingFor || '',
               interests: data.interests || []
             });
-            if (data.name) setView('discover');
-            else setView('register');
+            if (data.name && (view === 'welcome' || view === 'auth')) setView('discover');
           } else {
             setView('register');
           }
@@ -126,14 +123,10 @@ export default function App() {
       clearTimeout(timer);
       setIsInitializing(false);
     });
-
-    return () => {
-      unsubscribe();
-      clearTimeout(timer);
-    };
+    return () => { unsubscribe(); clearTimeout(timer); };
   }, []);
 
-  // --- CARGAR OTROS USUARIOS REALES ---
+  // --- CARGAR USUARIOS REALES ---
   useEffect(() => {
     if (view === 'discover' && currentUser) {
       const fetchUsers = async () => {
@@ -146,10 +139,9 @@ export default function App() {
               if (data.name) realUsers.push({ id: doc.id, ...data });
             }
           });
-          if (realUsers.length > 0) setProfiles([...realUsers, ...PERFILES_MOCK]);
-        } catch (e) {
-          console.error("Error cargando usuarios:", e);
-        }
+          // Mezclamos reales con ejemplos para que nunca esté vacío
+          setProfiles(realUsers.length > 0 ? [...realUsers, ...PERFILES_MOCK] : PERFILES_MOCK);
+        } catch (e) { console.error("Error cargando pista:", e); }
       };
       fetchUsers();
     }
@@ -200,10 +192,41 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOut(auth);
-    // Reiniciamos todo para que parezca una app recién abierta
     setCurrentUser(null);
     setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
+    setProfiles(PERFILES_MOCK);
+    setCurrentIndex(0);
     setView('welcome');
+  };
+
+  // --- LÓGICA DE MATCH REAL ---
+  const handleMatchAction = async (type) => {
+    if (showMatchAnimation) return; // Evitar clicks dobles
+    
+    const targetUser = profiles[currentIndex];
+    setShowMatchAnimation(type);
+
+    // Si es un usuario real, guardamos la intención en una colección de matches
+    if (currentUser && !targetUser.id.startsWith('m')) {
+      try {
+        await addDoc(collection(db, 'matches'), {
+          from: currentUser.uid,
+          fromName: myProfile.name,
+          to: targetUser.id,
+          toName: targetUser.name,
+          type: type, // 'beer' o 'hand'
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error("Error al guardar match:", e);
+      }
+    }
+
+    // Esperamos a que termine la animación y pasamos al siguiente
+    setTimeout(() => {
+      setShowMatchAnimation(null);
+      setCurrentIndex(prev => (prev + 1) % profiles.length);
+    }, 1500);
   };
 
   if (isInitializing) {
@@ -241,7 +264,7 @@ export default function App() {
                 <Crown className="text-white w-16 h-16" />
               </div>
               <div className="space-y-2">
-                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2">LigaRey</h1>
+                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2 leading-none">LigaRey</h1>
                 <p className="text-stone-500 italic font-medium">Encuentra nuevos amigos</p>
               </div>
               <div className="w-full max-w-xs space-y-4 pt-4">
@@ -251,7 +274,7 @@ export default function App() {
             </div>
           )}
 
-          {/* VISTA: AUTH (LOGIN/REGISTRO) */}
+          {/* VISTA: AUTH */}
           {view === 'auth' && (
             <div className="h-full flex flex-col p-6 bg-stone-50 animate-in slide-in-from-right">
               <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
@@ -271,7 +294,7 @@ export default function App() {
             </div>
           )}
 
-          {/* VISTA: PERFIL (REGISTRO DE DATOS) */}
+          {/* VISTA: PERFIL */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Mi Perfil</h2>
@@ -326,7 +349,7 @@ export default function App() {
               ) : (
                 <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
                   {myProfile.photo ? <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" /> : <div className="absolute inset-0 flex items-center justify-center text-stone-400"><Camera className="w-12 h-12" /></div>}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
                     <h2 className="text-3xl font-black tracking-tighter">{myProfile.name || 'Tu Nombre'}</h2>
                     <p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || 'Tu frase'}"</p>
@@ -347,24 +370,57 @@ export default function App() {
           {/* VISTA: DISCOVER (LA PISTA) */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in slide-in-from-bottom">
+              
+              {/* ANIMACIÓN DE MATCH */}
+              {showMatchAnimation && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/90 backdrop-blur-md animate-in fade-in duration-300">
+                  <div className="text-center animate-in zoom-in duration-500">
+                    <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-2xl border-4 border-stone-100 mx-auto mb-4">
+                      {showMatchAnimation === 'beer' ? <Beer className="w-12 h-12 text-amber-500 fill-current" /> : <Hand className="w-12 h-12 text-green-500 fill-current" />}
+                    </div>
+                    <h2 className="text-3xl font-black text-stone-800 uppercase tracking-tighter">
+                      {showMatchAnimation === 'beer' ? '¡PROPUESTA ENVIADA!' : '¡SALUDO ENVIADO!'}
+                    </h2>
+                    <p className="text-stone-500 text-xs font-bold mt-2">Estamos conectando tu Pase VIP...</p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
                 <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover shadow-inner" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                 <div className="absolute bottom-0 p-6 text-white w-full">
                   <div className="flex items-center gap-2 mb-1">
                     <h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>
-                    {profiles[currentIndex]?.id?.startsWith('m') && <span className="bg-white/20 px-2 py-0.5 rounded text-[8px] uppercase font-bold">Bot</span>}
+                    {profiles[currentIndex]?.id?.startsWith('m') && <span className="bg-white/20 px-2 py-0.5 rounded text-[8px] uppercase font-bold tracking-widest border border-white/20">Ejemplo</span>}
                   </div>
                   <p className="text-rose-300 font-bold mb-4 italic leading-tight">"{profiles[currentIndex]?.phrase || 'Hola!'}"</p>
                   <div className="flex flex-wrap gap-2">
-                    {(profiles[currentIndex]?.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold">{i}</span>)}
+                    {(profiles[currentIndex]?.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-wider">{i}</span>)}
                   </div>
                 </div>
               </div>
+
+              {/* BOTONES DE LA PISTA CORREGIDOS */}
               <div className="flex justify-center items-center gap-4 py-6">
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-amber-500"><Beer className="w-8 h-8" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-red-50"><X className="w-7 h-7" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-green-600"><Hand className="w-8 h-8" /></button>
+                <button 
+                  onClick={() => handleMatchAction('beer')} 
+                  className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-amber-500"
+                >
+                  <Beer className="w-8 h-8 fill-current" />
+                </button>
+                <button 
+                  onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} 
+                  className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-red-50"
+                >
+                  <X className="w-7 h-7" />
+                </button>
+                <button 
+                  onClick={() => handleMatchAction('hand')} 
+                  className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-green-600"
+                >
+                  <Hand className="w-8 h-8 fill-current" />
+                </button>
               </div>
             </div>
           )}
@@ -382,7 +438,7 @@ export default function App() {
         {/* MODAL QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
-            <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
+            <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in duration-300">
               <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800"><X className="w-6 h-6" /></button>
               <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase">Descuento Rey</h3>
               <div className="bg-stone-100 p-4 rounded-3xl inline-block mb-4 shadow-inner border border-stone-200">
