@@ -73,7 +73,8 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [authError, setAuthError] = useState('');
-  const [currentUser, setCurrentUser] = useState(null); // <-- NUEVO: Guardamos quién es el usuario actual
+  const [currentUser, setCurrentUser] = useState(null); 
+  const [isInitializing, setIsInitializing] = useState(true); // <-- NUEVO: Pantalla de carga mientras comprobamos la sesión
 
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
@@ -105,27 +106,46 @@ export default function App() {
     }
   }, [messages, view, activeChatId]);
 
-  // --- NUEVO: CARGAR PERFIL AL INICIAR SESIÓN ---
+  // --- NUEVO: AUTO-LOGIN Y CARGA DE DATOS AL REFRESCAR ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Si hay un usuario logueado, vamos a descargar sus datos de Firebase
-        const docRef = doc(db, 'usuarios', user.uid);
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setMyProfile(prev => ({
-            ...prev,
-            name: data.name || '',
-            photo: data.photo || null,
-            phrase: data.phrase || '',
-            lookingFor: data.lookingFor || '',
-            interests: data.interests || []
-          }));
+        try {
+          // 1. Si estás logueado, descargamos tus datos de la bóveda
+          const docRef = doc(db, 'usuarios', user.uid);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            // 2. Metemos tus datos en la app
+            setMyProfile({
+              name: data.name || '',
+              photo: data.photo || null,
+              phrase: data.phrase || '',
+              lookingFor: data.lookingFor || '',
+              interests: data.interests || []
+            });
+
+            // 3. AUTO-LOGIN: Si tienes nombre, vamos directo a la pista. Si no, a tu perfil.
+            if (data.name) {
+              setView('discover');
+            } else {
+              setView('register');
+            }
+          } else {
+             // Si acabas de registrarte y aún no hay doc, vas a crear el perfil
+             setView('register');
+          }
+        } catch (error) {
+          console.error("Error cargando perfil", error);
         }
+      } else {
+        // Si de verdad NO estás logueado, vamos a la bienvenida
+        setView('welcome');
       }
+      // Terminamos de comprobar, apagamos la pantalla de carga
+      setIsInitializing(false); 
     });
     return () => unsubscribe();
   }, []);
@@ -139,21 +159,20 @@ export default function App() {
       if (authMode === 'login') {
         // Iniciar sesión real
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
-        setView('discover'); 
+        // (Ya no cambiamos la vista aquí, lo hace automáticamente el useEffect de arriba)
       } else if (authMode === 'register') {
         // 1. Crear usuario en la bóveda de Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
         const user = userCredential.user;
         
-        // 2. Guardar el correo y el consentimiento de marketing en nuestra base de datos (Firestore)
+        // 2. Guardar el correo y el consentimiento de marketing en nuestra base de datos
         await setDoc(doc(db, 'usuarios', user.uid), {
           email: authForm.email,
           aceptaMarketing: authForm.marketing,
           aceptaTerminos: authForm.terms,
           fechaRegistro: new Date().toISOString()
         });
-        
-        setView('register'); 
+        // (Ya no cambiamos la vista aquí, lo hace automáticamente el useEffect de arriba)
       } else if (authMode === 'forgot') {
         // Mandar correo real de recuperación
         await sendPasswordResetEmail(auth, authForm.email);
@@ -635,6 +654,18 @@ export default function App() {
       </div>
     );
   };
+
+  // --- NUEVO: PANTALLA DE CARGA INICIAL ---
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center">
+        <div className="flex flex-col items-center gap-4 animate-pulse">
+          <Crown className="w-16 h-16 text-rose-500" />
+          <p className="text-stone-500 font-bold tracking-widest text-sm uppercase">Cargando tu pase VIP...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center selection:bg-rose-500/20">
