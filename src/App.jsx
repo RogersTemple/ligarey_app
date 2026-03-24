@@ -12,11 +12,11 @@ import {
   getAuth, 
   onAuthStateChanged, 
   signOut, 
-  signInAnonymously,
   signInWithCustomToken,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  deleteUser
+  deleteUser,
+  signInAnonymously
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -31,8 +31,8 @@ import {
   query
 } from 'firebase/firestore';
 
-// Protección anti-pantalla blanca para la configuración
-let firebaseConfig = {
+// Inicialización segura con variables de entorno
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
   authDomain: "ligarey.firebaseapp.com",
   projectId: "ligarey",
@@ -41,18 +41,10 @@ let firebaseConfig = {
   appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4"
 };
 
-try {
-  if (typeof __firebase_config !== 'undefined') {
-    firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-  }
-} catch (e) {
-  console.error("Usando configuración de respaldo");
-}
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'ligarey-oficial-v2';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ligarey-v3';
 
 // --- CONSTANTES ---
 const INTERESES_COMUNES = [
@@ -70,6 +62,7 @@ const PERFILES_MOCK = [
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
 
 export default function App() {
+  // Estados de la App
   const [view, setView] = useState('welcome');
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
@@ -78,15 +71,16 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
+  // Perfil del usuario
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true 
   });
-  
   const [photoError, setPhotoError] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState(''); 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Estados de Discover y Mensajería
   const [profiles, setProfiles] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showMatchAnimation, setShowMatchAnimation] = useState(null);
@@ -104,34 +98,37 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState('');
 
-  // Referencias blindadas para evitar errores de renderizado
+  // Refs de la App blindadas (soluciona el ReferenceError)
   const sessionStart = useRef(new Date().toISOString());
   const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null); 
 
-  // Rutas de Firestore exactas
+  // Rutas de Firestore
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
 
   // Auto-scroll en el chat
   useEffect(() => {
-    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chatMessages, view]);
 
   // --- ARRANQUE Y AUTENTICACIÓN ---
   useEffect(() => {
-    const initAuth = async () => {
+    const initApp = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         }
-      } catch (e) {
-        console.error("No se pudo iniciar sesión con token", e);
+      } catch (e) { 
+        console.error("Auth error silent fail"); 
       }
     };
-    initAuth();
+
+    initApp();
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -142,8 +139,8 @@ export default function App() {
             const data = userDoc.data();
             setMyProfile(prev => ({ ...prev, ...data }));
             
-            // Bloqueo: Si faltan datos clave, obliga a registrar
-            if (!data.name || !data.photo || !data.phrase || !data.lookingFor || !data.interests?.length) {
+            // Bloqueo si el perfil es nuevo o incompleto
+            if (!data.name || !data.photo || !data.phrase || !data.lookingFor) {
               setView('register');
             } else if (view === 'welcome' || view === 'auth') {
               setView('discover');
@@ -157,6 +154,7 @@ export default function App() {
       }
       setIsInitializing(false);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -181,7 +179,7 @@ export default function App() {
           }
         }
       });
-    });
+    }, (err) => console.error("Snapshot error avoided"));
 
     const unsubChats = onSnapshot(chatsCol, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -199,14 +197,16 @@ export default function App() {
           }
         }
       });
-    });
+    }, (err) => console.error("Snapshot error avoided"));
 
     return () => { unsubMatches(); unsubChats(); };
   }, [user, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR PISTA (DISCOVER) Y CHATS ---
+  // --- CARGAR DATOS (Pista y Chats) ---
   const fetchData = async () => {
     if (!user) return;
+    
+    let uniqueIds = [];
     try {
       const matchesSnap = await getDocs(matchesCol);
       const chatIds = [];
@@ -216,26 +216,34 @@ export default function App() {
         if (data.to === user.uid) chatIds.push({ id: data.from, name: data.fromName });
       });
       
-      const uniqueIds = Array.from(new Map(chatIds.map(item => [item.id, item])).values());
+      uniqueIds = Array.from(new Map(chatIds.map(item => [item.id, item])).values());
       const enriched = await Promise.all(uniqueIds.map(async (c) => {
         const uDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', c.id));
         return uDoc.exists() ? { ...c, ...uDoc.data() } : c;
       }));
       setActiveChats(enriched);
+    } catch (e) {
+      console.error("Error cargando chats/matches. Revisa las reglas de Firebase:", e);
+    }
 
-      if (view === 'discover') {
+    if (view === 'discover') {
+      try {
         const usersSnap = await getDocs(usersCol);
         const matchedSet = new Set(uniqueIds.map(c => c.id));
         const list = [];
         usersSnap.forEach(d => { 
-          // Solo carga perfiles reales que tengan nombre y foto
-          if (d.id !== user.uid && d.data().name && d.data().photo) {
+          // Cargamos a todos los usuarios reales registrados
+          if (d.id !== user.uid && d.data().name) {
             list.push({ id: d.id, ...d.data(), isAlreadyMatched: matchedSet.has(d.id) }); 
           }
         });
+        
         setProfiles(list.length > 0 ? list : PERFILES_MOCK);
+      } catch (e) {
+        console.error("Error cargando usuarios. Revisa las reglas de Firebase:", e);
+        setProfiles(PERFILES_MOCK); // Muestra los ejemplos si hay error de permisos
       }
-    } catch (e) { console.error("Error cargando datos:", e); }
+    }
   };
 
   useEffect(() => {
@@ -255,14 +263,13 @@ export default function App() {
           msgs.push({ id: doc.id, ...d });
         }
       });
-      // Ordenar por tiempo en memoria
       msgs.sort((a, b) => (a.timestamp > b.timestamp ? 1 : -1));
       setChatMessages(msgs);
     });
     return () => unsubChat();
   }, [user, activeChatUser]);
 
-  // --- FUNCIONES ---
+  // --- FUNCIONES DE AUTH Y PERFIL ---
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -278,21 +285,18 @@ export default function App() {
         setView('register');
       }
     } catch (error) {
-      if (error.code === 'auth/email-already-in-use') setAuthError('Este email ya está en uso.');
-      else if (error.code === 'auth/weak-password') setAuthError('Contraseña mínima 6 caracteres.');
-      else setAuthError('Error: Revisa tus datos.');
+      if (error?.code === 'auth/email-already-in-use') setAuthError('Este email ya está en uso.');
+      else if (error?.code === 'auth/weak-password') setAuthError('Contraseña mínima 6 caracteres.');
+      else setAuthError('Error: Revisa tus datos o si el email existe.');
     } finally { setIsAuthLoading(false); }
   };
 
   const saveProfileData = async () => {
     if (!user) return false;
-    
-    // Validación estricta para no dejar pasar perfiles incompletos
     if (!myProfile.name?.trim()) { setPhotoError('El nombre es obligatorio.'); return false; }
     if (!myProfile.photo) { setPhotoError('Debes subir una foto de perfil.'); return false; }
     if (!myProfile.phrase?.trim()) { setPhotoError('Escribe tu frase favorita.'); return false; }
     if (!myProfile.lookingFor?.trim()) { setPhotoError('Dinos qué buscas en el festival.'); return false; }
-    if (!myProfile.interests?.length) { setPhotoError('Elige al menos un interés.'); return false; }
 
     setIsSavingProfile(true);
     setPhotoError('');
@@ -301,7 +305,11 @@ export default function App() {
       setSaveMessage('¡Perfil guardado!');
       setTimeout(() => setSaveMessage(''), 2000);
       return true;
-    } catch (e) { setPhotoError('Error al guardar. Prueba con una foto de menor tamaño.'); return false; }
+    } catch (e) { 
+      console.error("Error guardando perfil:", e);
+      setPhotoError('Error al guardar. Si estás en Vercel, revisa las reglas de Firebase.'); 
+      return false; 
+    }
     finally { setIsSavingProfile(false); }
   };
 
@@ -322,6 +330,7 @@ export default function App() {
     await Promise.all(delPromises);
     setActiveChatUser(null);
     setView('messages');
+    fetchData();
   };
 
   const handleLogout = async () => {
@@ -329,6 +338,14 @@ export default function App() {
     setUser(null);
     setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true });
     setView('welcome');
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
+      await deleteUser(auth.currentUser);
+      handleLogout();
+    } catch (e) { setAuthError('Cierra sesión y entra de nuevo para poder borrar la cuenta.'); }
   };
 
   const handleMatchAction = async (type) => {
@@ -354,35 +371,25 @@ export default function App() {
     }, type === 'dislike' ? 300 : 1500);
   };
 
-  // PANTALLA DE CARGA INICIAL
-  if (isInitializing) {
-    return (
-      <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4">
-        <Crown className="w-20 h-20 text-rose-500 animate-pulse" />
-        <p className="text-stone-400 font-black text-[10px] uppercase tracking-[0.3em] animate-pulse">Cargando LigaRey...</p>
-      </div>
-    );
-  }
+  // --- CARGANDO ---
+  if (isInitializing) return <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /><p className="text-stone-400 font-black text-[10px] tracking-[0.2em]">CARGANDO LIGAREY...</p></div>;
 
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       
-      {/* TOAST DE NOTIFICACIÓN FLOTANTE */}
+      {/* TOAST FLOTANTE */}
       {newNotificationToast && (
         <div onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] w-full max-w-[340px] px-4 animate-in slide-in-from-top cursor-pointer">
           <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${newNotificationToast.isMessage ? 'bg-rose-500' : 'bg-amber-500'}`}>
               {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5" />}
             </div>
-            <div className="flex-1">
-              <p className="text-[9px] font-black uppercase text-rose-400">Aviso VIP</p>
-              <p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? 'te escribió' : 'te saludó'}</p>
-            </div>
+            <div className="flex-1"><p className="text-[9px] font-black uppercase text-rose-400">Aviso VIP</p><p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? 'te escribió' : 'te saludó'}</p></div>
           </div>
         </div>
       )}
 
-      {/* INSPECTOR VIP (Para ver perfiles desde el chat) */}
+      {/* INSPECTOR VIP */}
       {showInspector && (
         <div className="absolute inset-0 z-[500] bg-stone-900/95 backdrop-blur-xl animate-in slide-in-from-bottom flex flex-col p-6">
           <button onClick={() => setShowInspector(null)} className="self-end p-2 bg-white/10 rounded-full text-white mb-6"><X className="w-6 h-6" /></button>
@@ -391,23 +398,23 @@ export default function App() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
             <div className="absolute bottom-0 p-8 text-white w-full">
               <h2 className="text-4xl font-black tracking-tighter mb-2 leading-none">{showInspector.name}</h2>
-              <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase}"</p>
-              <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">Estoy buscando:</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
-              <div className="flex flex-wrap gap-2">{(showInspector.interests || []).map(i => <span key={i} className="px-3 py-1 bg-white/20 rounded-full text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
+              <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
+              <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">Busco:</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
+              <div className="flex flex-wrap gap-2">{(showInspector.interests || []).map((i, idx) => <span key={idx} className="px-3 py-1 bg-white/20 rounded-full text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
             </div>
           </div>
-          <button onClick={() => setShowInspector(null)} className="w-full py-5 mt-6 rounded-full bg-rose-500 text-white font-black uppercase tracking-widest active:scale-95 transition-all">Cerrar Ficha</button>
+          <button onClick={() => setShowInspector(null)} className="w-full py-5 mt-6 rounded-full bg-rose-500 text-white font-black uppercase tracking-widest">Cerrar Ficha</button>
         </div>
       )}
 
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* CABECERA */}
+        {/* CABECERA GENERAL */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
             <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
             <div className="flex items-center gap-2">
-              <button onClick={fetchData} className="p-2 text-stone-400 hover:text-rose-500 transition-colors active:rotate-180"><RefreshCcw className="w-4 h-4" /></button>
+              <button onClick={fetchData} className="p-2 text-stone-400 hover:text-rose-500 transition-colors"><RefreshCcw className="w-4 h-4" /></button>
               <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> DESCUENTO REY</button>
             </div>
           </div>
@@ -419,7 +426,7 @@ export default function App() {
           {view === 'welcome' && (
             <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
-              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
+              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey <span className="text-[10px] text-rose-500 font-bold ml-1">v3</span></h1>
               <div className="w-full max-w-xs space-y-4 pt-4">
                 <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta</button>
                 <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all">Ya tengo cuenta</button>
@@ -431,7 +438,7 @@ export default function App() {
           {view === 'auth' && (
             <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right">
               <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
-              <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? 'Bienvenido' : 'Nuevo VIP'}</h2>
+              <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? 'Hola' : 'Registro'}</h2>
               {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4" /> {authError}</p>}
               <form onSubmit={handleAuthSubmit} className="space-y-4">
                 <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
@@ -456,7 +463,7 @@ export default function App() {
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-colors">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
@@ -470,8 +477,8 @@ export default function App() {
                   <input type="text" placeholder="Frase favorita (Obligatorio)" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm italic" />
                   <textarea placeholder="ESTOY BUSCANDO: (Obligatorio)" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none h-20 focus:border-rose-400 shadow-sm" />
                   <div className="flex flex-wrap gap-2">
-                    {INTERESES_COMUNES.slice(0, 10).map(int => (
-                      <button key={int} onClick={() => {
+                    {INTERESES_COMUNES.slice(0, 10).map((int, idx) => (
+                      <button key={idx} onClick={() => {
                         const list = (myProfile.interests || []).includes(int) ? myProfile.interests.filter(i => i !== int) : [...(myProfile.interests || []), int].slice(0, 5);
                         setMyProfile({...myProfile, interests: list});
                       }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
@@ -481,20 +488,21 @@ export default function App() {
                     {saveMessage && <p className="text-green-600 text-center font-bold text-xs">{saveMessage}</p>}
                     <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">Guardar Cambios</button>
                     <button onClick={handleLogout} className="w-full text-stone-400 font-black text-[10px] uppercase py-2 active:opacity-50">Cerrar Sesión</button>
+                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-red-500 font-black text-[10px] uppercase py-2 active:opacity-50">Borrar Cuenta</button>
                   </div>
                 </div>
               ) : (
                 <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-                  <div className="absolute bottom-0 p-6 text-white w-full"><h2 className="text-3xl font-black mb-1 leading-none">{myProfile.name || 'Sin nombre'}</h2><p className="text-rose-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p><p className="text-white/60 text-[10px] uppercase font-black tracking-widest mb-3 leading-none">Busco: {myProfile.lookingFor}</p><div className="flex flex-wrap gap-2">{(myProfile.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[9px] uppercase font-bold">{i}</span>)}</div></div>
+                  <div className="absolute bottom-0 p-6 text-white w-full"><h2 className="text-3xl font-black mb-1 leading-none">{myProfile.name || 'Sin nombre'}</h2><p className="text-rose-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p><p className="text-white/60 text-[10px] uppercase font-black tracking-widest mb-3 leading-none">Busco: {myProfile.lookingFor}</p><div className="flex flex-wrap gap-2">{(myProfile.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[9px] uppercase font-bold tracking-widest">{i}</span>)}</div></div>
                 </div>
               )}
-              <button onClick={handleGoToPista} disabled={isSavingProfile} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all">¡A LA PISTA!</button>
+              <button onClick={handleGoToPista} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all">¡A LA PISTA!</button>
             </div>
           )}
 
-          {/* DISCOVER */}
+          {/* DISCOVER (LA PISTA) */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in fade-in">
               {showMatchAnimation && (
@@ -515,7 +523,7 @@ export default function App() {
                       <div className="flex items-center gap-2 mb-1"><h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>{profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-emerald-400" />}</div>
                       <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase}"</p>
                       <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-4 leading-none">Busco: {profiles[currentIndex]?.lookingFor}</p>
-                      <div className="flex flex-wrap gap-2">{(profiles[currentIndex]?.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
+                      <div className="flex flex-wrap gap-2">{(profiles[currentIndex]?.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                     </div>
                   </>
                 ) : (
@@ -534,7 +542,7 @@ export default function App() {
             </div>
           )}
 
-          {/* MENSAJES */}
+          {/* MENSAJES / CHATS */}
           {view === 'messages' && (
             <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
               <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter">Mis Chats</h2>
@@ -550,7 +558,7 @@ export default function App() {
             </div>
           )}
 
-          {/* CHAT ACTIVO */}
+          {/* CHAT PRIVADO */}
           {view === 'chat' && activeChatUser && (
             <div className="h-full flex flex-col bg-stone-50 animate-in slide-in-from-right duration-300">
               <div className="p-4 bg-white border-b flex items-center justify-between z-10 shadow-sm">
@@ -576,7 +584,7 @@ export default function App() {
                 addDoc(chatsCol, { from: user.uid, fromName: myProfile.name, to: activeChatUser.id, text: newMessageText, timestamp: new Date().toISOString() });
                 setNewMessageText('');
               }} className="p-4 bg-white border-t flex gap-2">
-                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Mensaje..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
+                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Escribe..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
                 <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg"><Send className="w-5 h-5 ml-1" /></button>
               </form>
             </div>
@@ -593,12 +601,13 @@ export default function App() {
                     <div className="flex-1"><p className="text-xs font-bold leading-tight"><b>{notif.fromName}</b> {notif.isMessage ? 'te escribió...' : `te mandó un ${notif.type}`}</p></div>
                   </div>
                 ))}
+                {notifications.length === 0 && <div className="mt-20 text-center opacity-30"><Bell className="w-12 h-12 mx-auto mb-4" /><p className="text-sm font-bold uppercase tracking-widest">Historial vacío</p></div>}
               </div>
             </div>
           )}
         </div>
 
-        {/* BOTTOM NAV */}
+        {/* BARRA INFERIOR */}
         {['discover', 'register', 'messages', 'notifications'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
@@ -608,7 +617,7 @@ export default function App() {
           </div>
         )}
 
-        {/* MODAL ELIMINACIÓN */}
+        {/* MODAL ELIMINACIÓN DE CUENTA */}
         {showDeleteConfirm && (
           <div className="absolute inset-0 z-[600] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl">
@@ -620,7 +629,7 @@ export default function App() {
           </div>
         )}
 
-        {/* MODAL QR */}
+        {/* MODAL QR DESCUENTO */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in">
