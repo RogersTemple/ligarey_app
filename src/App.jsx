@@ -3,13 +3,13 @@ import {
   Heart, X, MessageCircle, User, Flame, Music, 
   ChevronLeft, Send, Sparkles, Camera, Upload, 
   Trash2, Check, ZoomIn, Info, Crown, Hand, Beer, QrCode,
-  Mail, Lock, ArrowRight, KeyRound
+  Mail, Lock, ArrowRight, KeyRound, LogOut
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { getFirestore, doc, setDoc } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 
 // ⚠️ IMPORTANTE: SUSTITUYE ESTO POR EL CÓDIGO QUE TE DIÓ FIREBASE EN LA PÁGINA WEB
 const firebaseConfig = {
@@ -73,6 +73,7 @@ export default function App() {
   const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [authError, setAuthError] = useState('');
+  const [currentUser, setCurrentUser] = useState(null); // <-- NUEVO: Guardamos quién es el usuario actual
 
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
@@ -102,6 +103,31 @@ export default function App() {
       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, view, activeChatId]);
+
+  // --- NUEVO: CARGAR PERFIL AL INICIAR SESIÓN ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Si hay un usuario logueado, vamos a descargar sus datos de Firebase
+        const docRef = doc(db, 'usuarios', user.uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setMyProfile(prev => ({
+            ...prev,
+            name: data.name || '',
+            photo: data.photo || null,
+            phrase: data.phrase || '',
+            lookingFor: data.lookingFor || '',
+            interests: data.interests || []
+          }));
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // --- REGISTRO Y AUTH LOGIC ---
   const handleAuthSubmit = async (e) => {
@@ -177,6 +203,39 @@ export default function App() {
     });
   };
 
+  // --- NUEVO: GUARDAR PERFIL EN FIREBASE ---
+  const saveProfileAndGo = async () => {
+    if (currentUser) {
+      try {
+        const userRef = doc(db, 'usuarios', currentUser.uid);
+        await updateDoc(userRef, {
+          name: myProfile.name,
+          photo: myProfile.photo,
+          phrase: myProfile.phrase,
+          lookingFor: myProfile.lookingFor,
+          interests: myProfile.interests
+        });
+      } catch (error) {
+        console.error("Error al guardar el perfil:", error);
+      }
+    }
+    setView('discover');
+  };
+
+  // --- NUEVO: CERRAR SESIÓN ---
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setCurrentUser(null);
+      // Limpiamos los datos del perfil en la memoria local
+      setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
+      setAuthForm({ email: '', password: '', terms: false, marketing: false });
+      setView('welcome');
+    } catch (error) {
+      console.error("Error al cerrar sesión:", error);
+    }
+  };
+
   // --- MATCH LOGIC ---
   const handleMatch = (type) => {
     const currentProfile = PERFILES_MOCK[currentIndex];
@@ -215,7 +274,7 @@ export default function App() {
       </div>
       <div className="space-y-2 mb-8">
         <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 tracking-tight pb-2 leading-tight">LigaRey</h1>
-        <p className="text-stone-500 text-lg px-4 font-medium italic">El VIP de los festivales</p>
+        <p className="text-stone-500 text-lg px-4 font-medium italic">Encuentra nuevos amigos</p>
       </div>
       <div className="w-full max-w-xs space-y-4">
         <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-gradient-to-r from-rose-500 to-orange-400 text-white font-bold text-lg shadow-xl active:scale-95 transition-all">
@@ -387,8 +446,12 @@ export default function App() {
           </div>
 
           <div className="mt-8 pt-6 border-t border-stone-200">
-            <button onClick={() => setShowHelpModal(true)} className="flex items-center justify-center gap-2 w-full py-4 text-stone-500 font-bold bg-white rounded-2xl shadow-sm border border-stone-200 active:scale-95 transition-all hover:bg-stone-50">
+            <button onClick={() => setShowHelpModal(true)} className="flex items-center justify-center gap-2 w-full py-4 text-stone-500 font-bold bg-white rounded-2xl shadow-sm border border-stone-200 active:scale-95 transition-all hover:bg-stone-50 mb-4">
               <Info className="w-5 h-5" /> Ayuda e Instrucciones
+            </button>
+            
+            <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full py-4 text-red-500 font-bold bg-red-50 rounded-2xl shadow-sm border border-red-100 active:scale-95 transition-all hover:bg-red-100">
+              <LogOut className="w-5 h-5" /> Cerrar Sesión
             </button>
           </div>
         </div>
@@ -413,7 +476,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <button onClick={() => setView('discover')} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-bold text-xl shadow-lg active:scale-95 transition-all">¡A LA PISTA!</button>
+      <button onClick={saveProfileAndGo} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-bold text-xl shadow-lg active:scale-95 transition-all">¡A LA PISTA!</button>
     </div>
   );
 
