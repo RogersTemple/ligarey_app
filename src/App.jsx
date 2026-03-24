@@ -23,23 +23,18 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  updateDoc 
+  collection,
+  getDocs
 } from 'firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
-  authDomain: "ligarey.firebaseapp.com",
-  projectId: "ligarey",
-  storageBucket: "ligarey.firebasestorage.app",
-  messagingSenderId: "625102595981",
-  appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4",
-  measurementId: "G-ZYLWEZX85C"
-};
-
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-setPersistence(auth, browserLocalPersistence).catch(err => console.error("Error persistencia:", err));
 const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// Forzamos persistencia
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- CONSTANTES ---
 const INTERESES_COMUNES = [
@@ -55,48 +50,25 @@ const PERFILES_MOCK = [
     name: 'Lucía (Ejemplo)',
     age: 24,
     photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=500&fit=crop',
-    lookingFor: 'Alguien que se sepa todas las letras de Arctic Monkeys',
-    phrase: 'Viviendo el momento, un concierto a la vez. ✨ (Perfil de prueba)',
+    phrase: 'Viviendo el momento, un concierto a la vez. ✨',
     interests: ['Rock', 'Cerveza fría', 'Festivales'],
-  },
-  {
-    id: 'm2',
-    name: 'Carlos (Ejemplo)',
-    age: 27,
-    photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=500&fit=crop',
-    lookingFor: 'Gente para ir al escenario principal en 1 hora',
-    phrase: 'Buscando el mejor pogo de la noche. (Perfil de prueba)',
-    interests: ['Indie', 'Pogo', 'Electrónica'],
-  },
-  {
-    id: 'm3',
-    name: 'Elena (Ejemplo)',
-    age: 22,
-    photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=500&fit=crop',
-    lookingFor: 'Alguien para compartir glitter y baile',
-    phrase: 'Si hay techno, ahí me encuentras. (Perfil de prueba)',
-    interests: ['Electrónica', 'Bailar', 'Moda'],
   }
 ];
+
+const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
 
 export default function App() {
   const [view, setView] = useState('welcome');
   const [authMode, setAuthMode] = useState('login');
-  const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
-  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
-  
   const [currentUser, setCurrentUser] = useState(null); 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
-    name: '',
-    photo: null,
-    phrase: '',
-    lookingFor: '',
-    interests: []
+    name: '', photo: null, phrase: '', lookingFor: '', interests: []
   });
   
   const [tempPhoto, setTempPhoto] = useState(null);
@@ -105,24 +77,24 @@ export default function App() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState(''); 
 
+  // Estado para los usuarios reales que aparecen en la pista
+  const [profiles, setProfiles] = useState(PERFILES_MOCK);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showQRModal, setShowQRModal] = useState(false);
 
   const fileInputRef = useRef(null);
 
-  // --- LÓGICA DE INICIO ---
+  // --- LÓGICA DE INICIO Y PERSISTENCIA ---
   useEffect(() => {
-    const timer = setTimeout(() => setIsInitializing(false), 5000);
-
+    const safetyTimer = setTimeout(() => setIsInitializing(false), 5000);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         try {
-          const docRef = doc(db, 'usuarios', user.uid);
-          const docSnap = await getDoc(docRef);
-          
-          if (docSnap.exists()) {
-            const data = docSnap.data();
+          // Buscamos al usuario en la colección pública de perfiles
+          const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
             setMyProfile({
               name: data.name || '',
               photo: data.photo || null,
@@ -130,25 +102,44 @@ export default function App() {
               lookingFor: data.lookingFor || '',
               interests: data.interests || []
             });
-            if (data.name && (view === 'welcome' || view === 'auth')) {
-              setView('discover');
-            }
+            if (data.name && view === 'welcome') setView('discover');
           }
-        } catch (error) {
-          console.error("Error al cargar datos iniciales:", error);
-        }
+        } catch (e) { console.error("Error al cargar perfil inicial:", e); }
       } else {
         setCurrentUser(null);
       }
-      clearTimeout(timer);
+      clearTimeout(safetyTimer);
       setIsInitializing(false);
     });
-
-    return () => {
-      unsubscribe();
-      clearTimeout(timer);
-    };
+    return () => { unsubscribe(); clearTimeout(safetyTimer); };
   }, [view]);
+
+  // --- CARGAR USUARIOS REALES EN LA PISTA ---
+  useEffect(() => {
+    if (view === 'discover' && currentUser) {
+      const fetchRealUsers = async () => {
+        try {
+          const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'usuarios'));
+          const realUsers = [];
+          querySnapshot.forEach((doc) => {
+            // No nos mostramos a nosotros mismos en la pista
+            if (doc.id !== currentUser.uid) {
+              const data = doc.data();
+              // Solo mostramos gente que al menos tenga nombre y foto (para que la pista sea bonita)
+              if (data.name) {
+                realUsers.push({ id: doc.id, ...data });
+              }
+            }
+          });
+          // Mezclamos reales con mocks si hay pocos, o solo reales si hay muchos
+          setProfiles(realUsers.length > 0 ? realUsers : PERFILES_MOCK);
+        } catch (e) {
+          console.error("Error cargando usuarios:", e);
+        }
+      };
+      fetchRealUsers();
+    }
+  }, [view, currentUser]);
 
   // --- FUNCIONES ---
   const handleAuthSubmit = async (e) => {
@@ -161,201 +152,145 @@ export default function App() {
         setView('discover');
       } else if (authMode === 'register') {
         const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
-        await setDoc(doc(db, 'usuarios', userCredential.user.uid), {
+        // Creamos el documento inicial en la colección pública
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', userCredential.user.uid), {
           email: authForm.email,
           fechaRegistro: new Date().toISOString()
         }, { merge: true });
         setView('register');
       }
     } catch (error) {
-      setAuthError('Error de acceso. Verifica tu conexión.');
-    } finally {
-      setIsAuthLoading(false);
-    }
+      setAuthError('Error de acceso. Revisa tus datos.');
+    } finally { setIsAuthLoading(false); }
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    setPhotoError('');
-    if (file) {
-      if (file.size > 400 * 1024) {
-        setPhotoError('Foto demasiado grande (Máx 400KB).');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => { setTempPhoto(reader.result); setIsCropping(true); };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const confirmCrop = () => { setMyProfile(prev => ({ ...prev, photo: tempPhoto })); setIsCropping(false); };
-
-  const toggleInterest = (interest) => {
-    setMyProfile(prev => {
-      const interests = prev.interests.includes(interest)
-        ? prev.interests.filter(i => i !== interest)
-        : prev.interests.length < 5 ? [...prev.interests, interest] : prev.interests;
-      return { ...prev, interests };
-    });
-  };
-
-  // --- GUARDADO REFORZADO ---
   const saveProfileData = async () => {
-    if (!currentUser) {
-      setPhotoError('No se detectó usuario. Inicia sesión de nuevo.');
-      return false;
-    }
-    
+    if (!currentUser) return false;
     setIsSavingProfile(true);
     setPhotoError('');
-    setSaveMessage('');
-
     try {
-      const userRef = doc(db, 'usuarios', currentUser.uid);
-      
-      // Creamos una promesa que falla a los 7 segundos
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 7000)
-      );
-
-      // Carrera entre el guardado y el tiempo límite
-      await Promise.race([
-        setDoc(userRef, {
-          name: myProfile.name || '',
-          photo: myProfile.photo || null,
-          phrase: myProfile.phrase || '',
-          lookingFor: myProfile.lookingFor || '',
-          interests: myProfile.interests || []
-        }, { merge: true }),
-        timeoutPromise
-      ]);
-
-      setSaveMessage('¡Datos guardados con éxito!');
-      setTimeout(() => setSaveMessage(''), 3000);
+      // Guardamos en la ruta pública para que otros nos vean
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid), {
+        name: myProfile.name,
+        photo: myProfile.photo,
+        phrase: myProfile.phrase,
+        lookingFor: myProfile.lookingFor,
+        interests: myProfile.interests
+      }, { merge: true });
+      setSaveMessage('¡Guardado!');
+      setTimeout(() => setSaveMessage(''), 2000);
       return true;
-    } catch (e) {
-      console.error("Detalle del error:", e);
-      let msg = 'Error al conectar con Google.';
-      if (e.message === 'timeout') msg = 'Tiempo agotado. Revisa si has CREADO la base de datos en Firebase.';
-      if (e.code === 'permission-denied') msg = 'Error de permisos: Revisa las REGLAS de tu Firebase.';
-      
-      setPhotoError(msg);
-      return false;
-    } finally {
-      setIsSavingProfile(false);
-    }
+    } catch (e) { setPhotoError('Error al guardar en la nube.'); return false; }
+    finally { setIsSavingProfile(false); }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // REINICIO TOTAL DE ESTADOS
+      setCurrentUser(null);
+      setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
+      setAuthForm({ email: '', password: '' });
+      setAuthError('');
+      setCurrentIndex(0);
+      setView('welcome');
+    } catch (e) { console.error("Error al salir:", e); }
   };
 
   const handleGoToPista = async () => {
-    if (!myProfile.name.trim()) {
-      setPhotoError('Escribe tu nombre antes de entrar.');
-      return;
-    }
-    const success = await saveProfileData();
-    // Si tiene éxito, pasa. Si falla, el usuario tendrá que usar el botón de "Entrar de todos modos"
-    if (success) {
-      setView('discover');
-    }
+    if (!myProfile.name.trim()) { setPhotoError('El nombre es obligatorio.'); return; }
+    const ok = await saveProfileData();
+    if (ok) setView('discover');
   };
 
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-stone-900 flex justify-center items-center">
-        <div className="flex flex-col items-center gap-4 animate-pulse text-white">
-          <Crown className="w-16 h-16 text-rose-500" />
-          <p className="font-bold tracking-widest text-xs">CARGANDO...</p>
-        </div>
+        <Crown className="w-16 h-16 text-rose-500 animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans">
+    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* Cabecera */}
         {view !== 'welcome' && view !== 'auth' && (
-          <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10">
-            <div className="flex items-center gap-2">
-              <Crown className="w-5 h-5 text-rose-500" />
-              <h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1>
-            </div>
-            <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1">
-              <QrCode className="w-3 h-3" /> DESCUENTO REY
-            </button>
+          <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
+            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1></div>
+            <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> DESCUENTO REY</button>
           </div>
         )}
 
         <div className="flex-1 overflow-hidden relative">
           
-          {/* VISTA: BIENVENIDA */}
           {view === 'welcome' && (
             <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50">
-              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
+              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-in zoom-in duration-500">
                 <Crown className="text-white w-16 h-16" />
               </div>
-              <div>
+              <div className="space-y-2">
                 <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2 leading-none">LigaRey</h1>
                 <p className="text-stone-500 italic font-medium">Encuentra nuevos amigos</p>
               </div>
               <div className="w-full max-w-xs space-y-4 pt-4">
-                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta</button>
-                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold active:scale-95 transition-all">Entrar</button>
+                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear una cuenta</button>
+                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold active:scale-95 transition-all">Ya tengo cuenta</button>
               </div>
             </div>
           )}
 
-          {/* VISTA: AUTH */}
           {view === 'auth' && (
             <div className="h-full flex flex-col p-6 bg-stone-50">
-              <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
+              <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
               <div className="max-w-sm w-full mx-auto">
-                <h2 className="text-4xl font-black text-stone-900 mb-2 tracking-tight">{authMode === 'login' ? 'Hola' : 'VIP'}</h2>
-                {authError && <p className="text-red-500 text-xs font-bold mb-4 p-3 bg-red-50 rounded-xl">{authError}</p>}
+                <h2 className="text-4xl font-black text-stone-900 mb-2 tracking-tighter">{authMode === 'login' ? 'Bienvenido' : 'Únete al VIP'}</h2>
+                <p className="text-stone-500 mb-8 text-sm">{authMode === 'login' ? 'Entra para ver quién está en la pista.' : 'Regístrate gratis en 10 segundos.'}</p>
+                {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100">{authError}</p>}
                 <form onSubmit={handleAuthSubmit} className="space-y-4">
-                  <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
-                  <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
-                  <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold flex justify-center items-center h-14 transition-all active:scale-95">
-                    {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'Entrar' : 'Registrar')}
+                  <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors" />
+                  <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors" />
+                  <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold flex justify-center items-center h-14 shadow-lg active:scale-95 transition-all">
+                    {isAuthLoading ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'Entrar' : 'Registrarse')}
                   </button>
                 </form>
+                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-6 text-stone-500 text-xs font-bold uppercase tracking-widest">{authMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Entra'}</button>
               </div>
             </div>
           )}
 
-          {/* VISTA: PERFIL / REGISTRO */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
-              <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Tu Perfil</h2>
+              <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Mi Perfil</h2>
               
               <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner">
-                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>EDITAR</button>
-                <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>VISTA PREVIA</button>
+                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>EDITAR</button>
+                <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>VISTA PREVIA</button>
               </div>
 
               {profileMode === 'edit' ? (
                 <div className="space-y-6 animate-in fade-in duration-300">
                   <div className="flex flex-col items-center">
                     <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-all">
-                      {myProfile.photo ? <img src={myProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
+                      {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
-                    <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                    
-                    {/* MENSAJE DE ERROR MEJORADO */}
-                    {photoError && (
-                      <div className="mt-3 p-3 bg-red-50 text-red-700 text-[10px] font-bold rounded-xl border border-red-100 flex items-start gap-2 max-w-[250px] animate-in zoom-in">
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                        <span>{photoError}</span>
-                      </div>
-                    )}
-                    
-                    {!photoError && <p className="text-stone-400 text-[10px] mt-2 font-medium">Foto máx 400KB</p>}
+                    <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file && file.size <= 400 * 1024) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => { setTempPhoto(reader.result); setIsCropping(true); };
+                        reader.readAsDataURL(file);
+                      } else { setPhotoError('Máximo 400KB.'); }
+                    }} className="hidden" />
+                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Sube una foto (Máx 400KB)'}</p>
                   </div>
 
-                  <input type="text" placeholder="Tu nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
-                  <input type="text" placeholder="Tu frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 italic outline-none focus:border-rose-400 shadow-sm" />
-                  <textarea placeholder="¿Qué buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 h-24 outline-none focus:border-rose-400 shadow-sm" />
-                  
+                  <div className="space-y-4">
+                    <input type="text" placeholder="Tu nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
+                    <input type="text" placeholder="Frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 italic outline-none focus:border-rose-400 shadow-sm" />
+                    <textarea placeholder="¿Qué buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 h-24 outline-none focus:border-rose-400 shadow-sm" />
+                  </div>
+
                   <div className="flex flex-wrap gap-2">
                     {INTERESES_COMUNES.slice(0, 15).map(int => (
                       <button key={int} onClick={() => toggleInterest(int)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
@@ -363,77 +298,69 @@ export default function App() {
                   </div>
 
                   <div className="pt-6 space-y-4">
-                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs bg-green-50 py-2 rounded-lg border border-green-100 animate-pulse">{saveMessage}</p>}
-                    
-                    <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
-                      {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR DATOS'}
+                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs bg-green-50 py-2 rounded-lg border border-green-100">{saveMessage}</p>}
+                    <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all uppercase tracking-widest text-xs">
+                      {isSavingProfile ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Guardar Perfil'}
                     </button>
-
-                    {/* BOTÓN DE EMERGENCIA SI GOOGLE NO RESPONDE */}
-                    {photoError && (
-                      <button onClick={() => setView('discover')} className="w-full py-4 border-2 border-stone-200 text-stone-500 rounded-2xl text-[10px] font-black uppercase tracking-widest active:bg-stone-50 transition-colors">
-                        Saltar guardado y entrar (Invitado)
-                      </button>
-                    )}
-                    
-                    <button onClick={() => signOut(auth)} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50 transition-opacity">Cerrar Sesión</button>
+                    <button onClick={handleLogout} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
                 <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
-                  {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
+                  {myProfile.photo ? <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" /> : <div className="absolute inset-0 flex items-center justify-center text-stone-400"><Camera className="w-12 h-12" /></div>}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-black tracking-tight">{myProfile.name || 'Tu Nombre'}</h2>
-                    <p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || 'Frase estrella'}"</p>
+                    <h2 className="text-3xl font-black tracking-tighter">{myProfile.name || 'Tu Nombre'}</h2>
+                    <p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || 'Tu frase'}"</p>
                     <div className="flex flex-wrap gap-2">{myProfile.interests.map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold">{i}</span>)}</div>
                   </div>
                 </div>
               )}
-              
               <button onClick={handleGoToPista} disabled={isSavingProfile} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl flex justify-center items-center gap-2 uppercase tracking-widest active:scale-95 transition-all h-16">
                 {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : '¡A LA PISTA!'}
               </button>
             </div>
           )}
 
-          {/* VISTA: DISCOVER (Pista) */}
-          {view === 'discover' && (
+          {view === 'discover' && profiles.length > 0 && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in slide-in-from-bottom duration-500">
-              <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
-                <img src={PERFILES_MOCK[currentIndex].photo} className="absolute inset-0 w-full h-full object-cover" />
+              <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200 group">
+                <img src={profiles[currentIndex].photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                 <div className="absolute bottom-0 p-6 text-white w-full">
-                  <h2 className="text-4xl font-black leading-none mb-1">{PERFILES_MOCK[currentIndex].name}, 25</h2>
-                  <p className="text-rose-300 font-bold mb-4 italic">"{PERFILES_MOCK[currentIndex].phrase}"</p>
-                  <div className="flex flex-wrap gap-2">{PERFILES_MOCK[currentIndex].interests.map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold">{i}</span>)}</div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex].name}</h2>
+                    {profiles[currentIndex].id.startsWith('m') && <span className="bg-white/20 px-2 py-0.5 rounded text-[8px] uppercase font-bold">Bot</span>}
+                  </div>
+                  <p className="text-rose-300 font-bold mb-4 italic leading-tight">"{profiles[currentIndex].phrase || 'Sin frase...'}"</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(profiles[currentIndex].interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-wider">{i}</span>)}
+                  </div>
                 </div>
               </div>
               <div className="flex justify-center items-center gap-4 py-6">
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"><Beer className="w-8 h-8" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 transition-transform"><X className="w-7 h-7" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"><Hand className="w-8 h-8" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-amber-500"><Beer className="w-8 h-8" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-red-50"><X className="w-7 h-7" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % profiles.length)} className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-green-600"><Hand className="w-8 h-8" /></button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Barra Inferior */}
         {['discover', 'register'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
-            <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-400'}`}><Flame className="w-7 h-7" /></button>
+            <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
             <button className="p-2 text-stone-200 cursor-not-allowed"><MessageCircle className="w-7 h-7" /></button>
-            <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-rose-500 scale-110' : 'text-stone-400'}`}><User className="w-7 h-7" /></button>
+            <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><User className="w-7 h-7" /></button>
           </div>
         )}
 
-        {/* Modales */}
         {isCropping && (
-          <div className="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md">
+          <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in">
             <img src={tempPhoto} alt="Crop" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500 shadow-2xl" />
             <div className="flex gap-4 w-full max-w-xs">
-              <button onClick={() => setIsCropping(false)} className="flex-1 py-4 bg-white/10 text-white rounded-2xl font-bold">Cancelar</button>
-              <button onClick={confirmCrop} className="flex-1 py-4 bg-rose-500 text-white rounded-2xl font-bold">Aceptar</button>
+              <button onClick={() => setIsCropping(false)} className="flex-1 py-4 bg-white/10 text-white rounded-2xl font-bold">CANCELAR</button>
+              <button onClick={() => { setMyProfile(p => ({...p, photo: tempPhoto})); setIsCropping(false); }} className="flex-1 py-4 bg-rose-500 text-white rounded-2xl font-bold">ACEPTAR</button>
             </div>
           </div>
         )}
@@ -454,3 +381,12 @@ export default function App() {
     </div>
   );
 }
+
+const toggleInterest = (interest, setMyProfile) => {
+  setMyProfile(prev => {
+    const interests = prev.interests.includes(interest)
+      ? prev.interests.filter(i => i !== interest)
+      : prev.interests.length < 5 ? [...prev.interests, interest] : prev.interests;
+    return { ...prev, interests };
+  });
+};
