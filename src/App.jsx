@@ -86,6 +86,7 @@ export default function App() {
   
   const [tempPhoto, setTempPhoto] = useState(null);
   const [isCropping, setIsCropping] = useState(false);
+  const [photoError, setPhotoError] = useState(''); // <-- NUEVO: Estado para el error de la foto
   const [currentIndex, setCurrentIndex] = useState(0);
   const [matches, setMatches] = useState([]); 
   const [activeChatId, setActiveChatId] = useState(null);
@@ -176,7 +177,15 @@ export default function App() {
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
+    setPhotoError(''); // Limpiamos cualquier error previo
+    
     if (file) {
+      // Validamos el límite de tamaño: 800 KB (800 * 1024 bytes)
+      if (file.size > 800 * 1024) {
+        setPhotoError('La foto pesa demasiado. Elige una de menos de 800KB (truco: hazle una captura de pantalla).');
+        return; // Detenemos la función aquí
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         setTempPhoto(reader.result);
@@ -205,21 +214,25 @@ export default function App() {
 
   // --- NUEVO: GUARDAR PERFIL EN FIREBASE ---
   const saveProfileAndGo = async () => {
+    // 1. Cambiamos de pantalla INSTANTÁNEAMENTE para no hacer esperar al usuario
+    setView('discover');
+
+    // 2. Guardamos en la base de datos de Google en segundo plano
     if (currentUser) {
       try {
         const userRef = doc(db, 'usuarios', currentUser.uid);
-        await updateDoc(userRef, {
+        // Usamos setDoc con { merge: true } (es más seguro y a prueba de fallos)
+        await setDoc(userRef, {
           name: myProfile.name,
           photo: myProfile.photo,
           phrase: myProfile.phrase,
           lookingFor: myProfile.lookingFor,
           interests: myProfile.interests
-        });
+        }, { merge: true });
       } catch (error) {
         console.error("Error al guardar el perfil:", error);
       }
     }
-    setView('discover');
   };
 
   // --- NUEVO: CERRAR SESIÓN ---
@@ -434,6 +447,15 @@ export default function App() {
               {myProfile.photo ? <img src={myProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
             </div>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+            
+            {/* NUEVO: Mostrar el mensaje de error o el límite */}
+            {photoError ? (
+              <div className="mt-3 p-2 bg-red-50 text-red-600 text-xs font-bold rounded-lg border border-red-100 flex items-start gap-1 max-w-[200px] text-center animate-in zoom-in">
+                <X className="w-4 h-4 shrink-0" /> {photoError}
+              </div>
+            ) : (
+              <p className="text-stone-400 text-xs mt-2 font-medium">Máx 800KB</p>
+            )}
           </div>
           <input type="text" placeholder="Nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 shadow-sm focus:outline-none focus:border-rose-400" />
           <input type="text" placeholder="Frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 shadow-sm italic focus:outline-none focus:border-rose-400" />
