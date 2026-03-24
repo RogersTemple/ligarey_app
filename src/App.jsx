@@ -86,7 +86,7 @@ export default function App() {
 
   // --- ESTADOS DE MENSAJERÍA Y NOTIFICACIONES ---
   const [notifications, setNotifications] = useState([]);
-  const [activeChats, setActiveChats] = useState([]); // Lista de personas con las que tengo chat
+  const [activeChats, setActiveChats] = useState([]);
   const [newNotificationToast, setNewNotificationToast] = useState(null);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -94,7 +94,10 @@ export default function App() {
   const [activeChatUser, setActiveChatUser] = useState(null); 
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState('');
-  
+
+  // Refs para control de sesión y duplicados
+  const sessionStart = useRef(new Date().toISOString());
+  const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -102,12 +105,19 @@ export default function App() {
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, view]);
 
+  // Limpiar avisos al entrar en las pestañas correspondientes
+  useEffect(() => {
+    if (view === 'notifications') setHasUnreadNotifs(false);
+    if (view === 'messages') setHasUnreadMessages(false);
+  }, [view]);
+
   // --- LÓGICA DE INICIO ---
   useEffect(() => {
     const timer = setTimeout(() => setIsInitializing(false), 6000);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
+        if ("Notification" in window) Notification.requestPermission();
         try {
           const userDoc = await getDoc(doc(db, 'usuarios', user.uid));
           if (userDoc.exists()) {
@@ -130,25 +140,37 @@ export default function App() {
     return () => { unsubscribe(); clearTimeout(timer); };
   }, []);
 
-  // --- ESCUCHADORES EN TIEMPO REAL ---
+  // --- ESCUCHADORES EN TIEMPO REAL REFORZADOS ---
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Escuchar Matches (Propuestas)
+    // 1. Escuchar Matches (Propuestas de birra/saludo)
     const qMatches = query(collection(db, 'matches'));
     const unsubMatches = onSnapshot(qMatches, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          if (data.to === currentUser.uid) {
-            const notif = { id: change.doc.id, ...data, isMessage: false };
+          const id = change.doc.id;
+
+          // SOLO NOTIFICAR SI: Es para mí, ocurrió tras abrir la app y no ha sido notificado ya
+          if (data.to === currentUser.uid && data.timestamp > sessionStart.current && !notifiedIds.current.has(id)) {
+            notifiedIds.current.add(id);
+            const notif = { id, ...data, isMessage: false };
             setNotifications(prev => [notif, ...prev]);
+            
             if (view !== 'notifications') setHasUnreadNotifs(true);
 
             if (myProfile.notificationsEnabled) {
               setNewNotificationToast(notif);
               setTimeout(() => setNewNotificationToast(null), 6000);
+              if (Notification.permission === "granted") new Notification(`¡Propuesta de ${data.fromName}!`);
             }
+          } else if (data.to === currentUser.uid) {
+            // Si es antiguo, solo lo añadimos a la lista sin hacer ruido
+            setNotifications(prev => {
+              if (prev.find(n => n.id === id)) return prev;
+              return [{ id, ...data, isMessage: false }, ...prev];
+            });
           }
         }
       });
@@ -160,12 +182,16 @@ export default function App() {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          if (data.to === currentUser.uid) {
+          const id = change.doc.id;
+
+          if (data.to === currentUser.uid && data.timestamp > sessionStart.current && !notifiedIds.current.has(id)) {
+            notifiedIds.current.add(id);
+            // Si no estoy en el chat con esa persona, aviso
             if (!activeChatUser || activeChatUser.id !== data.from) {
               if (view !== 'messages' && view !== 'chat') setHasUnreadMessages(true);
               
               if (myProfile.notificationsEnabled) {
-                const notif = { id: change.doc.id, ...data, isMessage: true };
+                const notif = { id, ...data, isMessage: true };
                 setNewNotificationToast(notif);
                 setTimeout(() => setNewNotificationToast(null), 6000);
               }
@@ -178,7 +204,7 @@ export default function App() {
     return () => { unsubMatches(); unsubChats(); };
   }, [currentUser, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR LISTA DE CHATS ACTIVOS ---
+  // --- CARGAR LISTA DE CHATS ---
   useEffect(() => {
     if ((view === 'messages' || view === 'discover') && currentUser) {
       const fetchChats = async () => {
@@ -189,7 +215,6 @@ export default function App() {
           if (data.from === currentUser.uid) chatList.push({ id: data.to, name: data.toName });
           if (data.to === currentUser.uid) chatList.push({ id: data.from, name: data.fromName });
         });
-        // Eliminar duplicados
         const uniqueChats = Array.from(new Map(chatList.map(item => [item.id, item])).values());
         setActiveChats(uniqueChats);
       };
@@ -211,11 +236,13 @@ export default function App() {
         }
       });
       setChatMessages(msgs);
+      // Si recibo mensaje estando en el chat, no hay punto rojo
+      if (view === 'chat') setHasUnreadMessages(false);
     });
     return () => unsubscribe();
-  }, [currentUser, activeChatUser]);
+  }, [currentUser, activeChatUser, view]);
 
-  // --- CARGAR PISTA (DISCOVER) ---
+  // --- CARGAR PISTA ---
   useEffect(() => {
     if (view === 'discover' && currentUser) {
       const fetchDiscover = async () => {
@@ -250,28 +277,15 @@ export default function App() {
     finally { setIsAuthLoading(false); }
   };
 
-  const toggleInterestLocal = (int) => {
-    setMyProfile(prev => {
-      const current = prev.interests || [];
-      const newList = current.includes(int) ? current.filter(i => i !== int) : [...current, int].slice(0, 5);
-      return { ...prev, interests: newList };
-    });
-  };
-
   const saveProfileData = async () => {
     if (!currentUser) return;
     setIsSavingProfile(true);
     try {
       await setDoc(doc(db, 'usuarios', currentUser.uid), { ...myProfile }, { merge: true });
-      setSaveMessage('¡Datos actualizados!');
+      setSaveMessage('¡Guardado!');
       setTimeout(() => setSaveMessage(''), 2000);
     } catch (e) { setPhotoError('Error al guardar.'); }
     finally { setIsSavingProfile(false); }
-  };
-
-  const clearNotifications = () => {
-    setNotifications([]);
-    setHasUnreadNotifs(false);
   };
 
   const deleteConversation = async (otherUserId) => {
@@ -319,7 +333,7 @@ export default function App() {
               {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : (newNotificationToast.type === 'beer' ? <Beer className="w-5 h-5" /> : <Hand className="w-5 h-5" />)}
             </div>
             <div className="flex-1">
-              <p className="text-[9px] font-black uppercase tracking-widest text-rose-400">{newNotificationToast.isMessage ? 'Nuevo Mensaje' : 'Propuesta'}</p>
+              <p className="text-[9px] font-black uppercase tracking-widest text-rose-400">{newNotificationToast.isMessage ? 'Mensaje nuevo' : 'Propuesta'}</p>
               <p className="text-xs font-bold leading-tight truncate"><b>{newNotificationToast.fromName}</b>: {newNotificationToast.isMessage ? newNotificationToast.text : `¡Te ha saludado!`}</p>
             </div>
           </div>
@@ -328,7 +342,6 @@ export default function App() {
 
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* CABECERA (Se oculta en el chat para ganar espacio) */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
             <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase">LigaRey</h1></div>
@@ -338,9 +351,8 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative">
           
-          {/* VISTAS DE ENTRADA */}
           {view === 'welcome' && (
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in duration-500">
+            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
               <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
               <div className="w-full max-w-xs space-y-4 pt-4">
@@ -362,7 +374,6 @@ export default function App() {
             </div>
           )}
 
-          {/* LA PISTA (DISCOVER) */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in fade-in duration-500">
               {showMatchAnimation && (
@@ -396,74 +407,43 @@ export default function App() {
             </div>
           )}
 
-          {/* LISTA DE CHATS */}
           {view === 'messages' && (
             <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
               <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter leading-none">Tus Chats</h2>
               <div className="space-y-3">
                 {activeChats.map((chat) => (
-                  <div 
-                    key={chat.id} 
-                    onClick={() => { setActiveChatUser(chat); setView('chat'); }}
-                    className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 flex items-center gap-4 cursor-pointer active:scale-95 transition-all"
-                  >
+                  <div key={chat.id} onClick={() => { setActiveChatUser(chat); setView('chat'); }} className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 flex items-center gap-4 cursor-pointer active:scale-95 transition-all">
                     <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center text-rose-500 font-black text-xl border-2 border-white shadow-sm">{chat.name[0]}</div>
-                    <div className="flex-1">
-                      <p className="text-lg font-bold text-stone-800 tracking-tight">{chat.name}</p>
-                      <p className="text-[10px] text-stone-400 font-black uppercase tracking-widest">Toca para hablar</p>
-                    </div>
+                    <div className="flex-1"><p className="text-lg font-bold text-stone-800 tracking-tight">{chat.name}</p><p className="text-[10px] text-stone-400 font-black uppercase tracking-widest">Chat abierto</p></div>
                   </div>
                 ))}
-                {activeChats.length === 0 && (
-                  <div className="mt-20 text-center opacity-30 px-8">
-                    <MessageCircle className="w-12 h-12 mx-auto mb-4" />
-                    <p className="text-sm font-bold uppercase tracking-widest">Ve a la pista para empezar a hablar</p>
-                  </div>
-                )}
+                {activeChats.length === 0 && <div className="mt-20 text-center opacity-30 px-8"><MessageCircle className="w-12 h-12 mx-auto mb-4" /><p className="text-sm font-bold uppercase tracking-widest">Sin chats activos</p></div>}
               </div>
             </div>
           )}
 
-          {/* NOTIFICACIONES (SECCIÓN NUEVA E INDEPENDIENTE) */}
           {view === 'notifications' && (
             <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-3xl font-black uppercase tracking-tighter leading-none">Actividad</h2>
-                {notifications.length > 0 && (
-                  <button onClick={clearNotifications} className="p-2 text-stone-400 hover:text-rose-500 transition-colors flex items-center gap-1">
-                    <Eraser className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Limpiar</span>
-                  </button>
-                )}
+                <button onClick={() => { setNotifications([]); setHasUnreadNotifs(false); }} className="p-2 text-stone-400 hover:text-rose-500 transition-colors flex items-center gap-1">
+                  <Eraser className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">Limpiar</span>
+                </button>
               </div>
-              
               <div className="space-y-3">
                 {notifications.map((notif) => (
-                  <div 
-                    key={notif.id} 
-                    onClick={() => { setActiveChatUser({ id: notif.from, name: notif.fromName }); setView('chat'); }}
-                    className="bg-stone-900 text-white p-4 rounded-3xl shadow-lg flex items-center gap-4 cursor-pointer active:scale-95 transition-all"
-                  >
+                  <div key={notif.id} onClick={() => { setActiveChatUser({ id: notif.from, name: notif.fromName }); setView('chat'); }} className="bg-stone-900 text-white p-4 rounded-3xl shadow-lg flex items-center gap-4 cursor-pointer active:scale-95 transition-all">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.isMessage ? 'bg-rose-500' : (notif.type === 'beer' ? 'bg-amber-500' : 'bg-green-500')}`}>
                       {notif.isMessage ? <MessageCircle className="w-5 h-5" /> : (notif.type === 'beer' ? <Beer className="w-5 h-5" /> : <Hand className="w-5 h-5" />)}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold leading-tight"><b>{notif.fromName}</b> {notif.isMessage ? 'escribió...' : `te mandó un ${notif.type === 'beer' ? 'brindis' : 'saludo'}`}</p>
-                      <p className="text-[8px] text-white/40 font-black uppercase tracking-widest mt-1">Hacer clic para ver</p>
-                    </div>
+                    <div className="flex-1"><p className="text-xs font-bold leading-tight"><b>{notif.fromName}</b> {notif.isMessage ? 'escribió...' : `te mandó un ${notif.type}`}</p></div>
                   </div>
                 ))}
-                {notifications.length === 0 && (
-                  <div className="mt-20 text-center opacity-30">
-                    <Bell className="w-12 h-12 mx-auto mb-4" />
-                    <p className="text-sm font-bold uppercase tracking-widest">Nada nuevo por ahora</p>
-                  </div>
-                )}
+                {notifications.length === 0 && <div className="mt-20 text-center opacity-30"><Bell className="w-12 h-12 mx-auto mb-4" /><p className="text-sm font-bold uppercase tracking-widest">Historial vacío</p></div>}
               </div>
             </div>
           )}
 
-          {/* VISTA DE CHAT */}
           {view === 'chat' && activeChatUser && (
             <div className="h-full flex flex-col bg-stone-50 animate-in slide-in-from-right duration-300">
               <div className="p-4 bg-white border-b flex items-center justify-between z-10 shadow-sm">
@@ -489,26 +469,23 @@ export default function App() {
                 addDoc(collection(db, 'chats'), { from: currentUser.uid, fromName: myProfile.name, to: activeChatUser.id, text: newMessageText, timestamp: new Date().toISOString() });
                 setNewMessageText('');
               }} className="p-4 bg-white border-t flex gap-2">
-                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none" />
+                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Mensaje..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none" />
                 <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform"><Send className="w-5 h-5 ml-1" /></button>
               </form>
             </div>
           )}
 
-          {/* PERFIL / CONFIGURACIÓN */}
           {view === 'register' && (
-            <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50 animate-in fade-in">
+            <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-center mb-6 uppercase tracking-tighter">Mi Cuenta</h2>
-              
               <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner">
                 <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>DATOS</button>
                 <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>PREVIA</button>
               </div>
-
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-all">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
@@ -517,47 +494,26 @@ export default function App() {
                       reader.readAsDataURL(e.target.files[0]);
                     }} className="hidden" />
                   </div>
-                  
-                  <input type="text" placeholder="Nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none shadow-sm" />
-                  
-                  <div className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl ${myProfile.notificationsEnabled ? 'bg-green-100 text-green-600' : 'bg-stone-100 text-stone-400'}`}>
-                          {myProfile.notificationsEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
-                        </div>
-                        <p className="text-xs font-black uppercase text-stone-800">Avisos VIP</p>
-                      </div>
-                      <button onClick={() => setMyProfile({...myProfile, notificationsEnabled: !myProfile.notificationsEnabled})} className={`w-10 h-5 rounded-full relative transition-colors ${myProfile.notificationsEnabled ? 'bg-rose-500' : 'bg-stone-300'}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${myProfile.notificationsEnabled ? 'left-5.5' : 'left-0.5'}`} />
-                      </button>
-                    </div>
+                  <input type="text" placeholder="Nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none" />
+                  <div className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-3"><Bell className="w-5 h-5 text-stone-400" /><p className="text-xs font-black uppercase text-stone-800">Notificaciones</p></div>
+                    <button onClick={() => setMyProfile({...myProfile, notificationsEnabled: !myProfile.notificationsEnabled})} className={`w-10 h-5 rounded-full relative transition-colors ${myProfile.notificationsEnabled ? 'bg-rose-500' : 'bg-stone-300'}`}><div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${myProfile.notificationsEnabled ? 'left-5.5' : 'left-0.5'}`} /></button>
                   </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {INTERESES_COMUNES.slice(0, 10).map(int => (
-                      <button key={int} onClick={() => toggleInterestLocal(int)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white text-stone-500'}`}>{int}</button>
-                    ))}
-                  </div>
-
+                  <div className="flex flex-wrap gap-2">{INTERESES_COMUNES.slice(0, 10).map(int => (<button key={int} onClick={() => toggleInterestLocal(int)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>))}</div>
                   <div className="pt-6 space-y-4">
                     {saveMessage && <p className="text-green-600 text-center font-bold text-xs">{saveMessage}</p>}
-                    <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-[0.2em] shadow-lg">Guardar Cambios</button>
+                    <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-[0.2em]">Guardar Cambios</button>
                     <button onClick={() => signOut(auth).then(() => setView('welcome'))} className="w-full text-red-500 font-black text-[10px] uppercase tracking-[0.2em] py-2">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
+                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200">
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-                  <div className="absolute bottom-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-black tracking-tighter">{myProfile.name || 'Sin nombre'}</h2>
-                    <p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || '¡Hola!'}"</p>
-                    <div className="flex flex-wrap gap-2">{(myProfile.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold">{i}</span>)}</div>
-                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
+                  <div className="absolute bottom-0 p-6 text-white w-full"><h2 className="text-3xl font-black tracking-tighter">{myProfile.name || 'Tu Nombre'}</h2><p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || '¡Hola!'}"</p><div className="flex flex-wrap gap-2">{(myProfile.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold">{i}</span>)}</div></div>
                 </div>
               )}
-              <button onClick={() => setView('discover')} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase tracking-widest h-16 active:scale-95 transition-all">¡A LA PISTA!</button>
+              <button onClick={() => setView('discover')} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all">¡A LA PISTA!</button>
             </div>
           )}
         </div>
@@ -565,25 +521,15 @@ export default function App() {
         {/* BARRA INFERIOR REESTRUCTURADA */}
         {['discover', 'register', 'messages', 'notifications'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
-            {/* Llama - Discover */}
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
-            
-            {/* Chat - Mensajes */}
             <button onClick={() => setView('messages')} className={`p-2 relative transition-all ${view === 'messages' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}>
               <MessageCircle className="w-7 h-7" />
               {hasUnreadMessages && <span className="absolute top-2 right-2 w-3 h-3 bg-rose-500 border-2 border-white rounded-full animate-pulse"></span>}
             </button>
-
-            {/* Campana - Notificaciones de Actividad */}
-            <button 
-              onClick={() => { setView('notifications'); setHasUnreadNotifs(false); }} 
-              className={`p-2 relative transition-all ${view === 'notifications' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}
-            >
+            <button onClick={() => setView('notifications')} className={`p-2 relative transition-all ${view === 'notifications' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}>
               <Bell className="w-7 h-7" />
-              {hasUnreadNotifs && <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>}
+              {hasUnreadNotifs && <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 border-2 border-white rounded-full animate-pulse"></span>}
             </button>
-            
-            {/* Usuario - Ajustes/Perfil */}
             <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><User className="w-7 h-7" /></button>
           </div>
         )}
@@ -592,9 +538,9 @@ export default function App() {
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
-              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase">Descuento Rey</h3>
-              <div className="bg-stone-100 p-4 rounded-3xl inline-block mb-4 shadow-inner">
+              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300"><X className="w-6 h-6" /></button>
+              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase font-black">Descuento Rey</h3>
+              <div className="bg-stone-100 p-4 rounded-3xl inline-block mb-4">
                 <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${currentUser?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply" />
               </div>
               <p className="text-[10px] text-stone-500 uppercase font-black tracking-widest opacity-60">Muestra en barra principal</p>
