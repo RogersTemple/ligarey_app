@@ -148,7 +148,7 @@ export default function App() {
       unsubscribe();
       clearTimeout(timer);
     };
-  }, []);
+  }, [view]);
 
   // --- FUNCIONES ---
   const handleAuthSubmit = async (e) => {
@@ -213,9 +213,9 @@ export default function App() {
     try {
       const userRef = doc(db, 'usuarios', currentUser.uid);
       
-      // Creamos una promesa que falla a los 8 segundos
+      // Creamos una promesa que falla a los 7 segundos
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 8000)
+        setTimeout(() => reject(new Error('timeout')), 7000)
       );
 
       // Carrera entre el guardado y el tiempo límite
@@ -234,10 +234,10 @@ export default function App() {
       setTimeout(() => setSaveMessage(''), 3000);
       return true;
     } catch (e) {
-      console.error("Detalle del error Firebase:", e);
+      console.error("Detalle del error:", e);
       let msg = 'Error al conectar con Google.';
-      if (e.message === 'timeout') msg = 'Tiempo de espera agotado. ¿Tienes internet?';
-      if (e.code === 'permission-denied') msg = 'Error de permisos: Revisa las reglas de Firebase.';
+      if (e.message === 'timeout') msg = 'Tiempo agotado. Revisa si has CREADO la base de datos en Firebase.';
+      if (e.code === 'permission-denied') msg = 'Error de permisos: Revisa las REGLAS de tu Firebase.';
       
       setPhotoError(msg);
       return false;
@@ -252,6 +252,7 @@ export default function App() {
       return;
     }
     const success = await saveProfileData();
+    // Si tiene éxito, pasa. Si falla, el usuario tendrá que usar el botón de "Entrar de todos modos"
     if (success) {
       setView('discover');
     }
@@ -277,7 +278,7 @@ export default function App() {
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10">
             <div className="flex items-center gap-2">
               <Crown className="w-5 h-5 text-rose-500" />
-              <h1 className="text-xl font-black text-rose-500">LIGAREY</h1>
+              <h1 className="text-xl font-black text-rose-500 tracking-tighter">LIGAREY</h1>
             </div>
             <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1">
               <QrCode className="w-3 h-3" /> DESCUENTO REY
@@ -314,7 +315,7 @@ export default function App() {
                 <form onSubmit={handleAuthSubmit} className="space-y-4">
                   <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
                   <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
-                  <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold flex justify-center items-center h-14">
+                  <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold flex justify-center items-center h-14 transition-all active:scale-95">
                     {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'Entrar' : 'Registrar')}
                   </button>
                 </form>
@@ -333,14 +334,24 @@ export default function App() {
               </div>
 
               {profileMode === 'edit' ? (
-                <div className="space-y-6">
+                <div className="space-y-6 animate-in fade-in duration-300">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-all">
                       {myProfile.photo ? <img src={myProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500 bg-red-50 px-2 py-1 rounded' : 'text-stone-400'}`}>{photoError || 'Foto máx 400KB'}</p>
+                    
+                    {/* MENSAJE DE ERROR MEJORADO */}
+                    {photoError && (
+                      <div className="mt-3 p-3 bg-red-50 text-red-700 text-[10px] font-bold rounded-xl border border-red-100 flex items-start gap-2 max-w-[250px] animate-in zoom-in">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{photoError}</span>
+                      </div>
+                    )}
+                    
+                    {!photoError && <p className="text-stone-400 text-[10px] mt-2 font-medium">Foto máx 400KB</p>}
                   </div>
+
                   <input type="text" placeholder="Tu nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
                   <input type="text" placeholder="Tu frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 italic outline-none focus:border-rose-400 shadow-sm" />
                   <textarea placeholder="¿Qué buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 h-24 outline-none focus:border-rose-400 shadow-sm" />
@@ -358,17 +369,18 @@ export default function App() {
                       {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR DATOS'}
                     </button>
 
+                    {/* BOTÓN DE EMERGENCIA SI GOOGLE NO RESPONDE */}
                     {photoError && (
-                      <button onClick={() => setView('discover')} className="w-full py-2 text-stone-400 text-[10px] font-bold underline uppercase tracking-widest">
-                        Entrar sin guardar (Modo Invitado)
+                      <button onClick={() => setView('discover')} className="w-full py-4 border-2 border-stone-200 text-stone-500 rounded-2xl text-[10px] font-black uppercase tracking-widest active:bg-stone-50 transition-colors">
+                        Saltar guardado y entrar (Invitado)
                       </button>
                     )}
                     
-                    <button onClick={() => signOut(auth)} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2">Cerrar Sesión</button>
+                    <button onClick={() => signOut(auth)} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50 transition-opacity">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200">
+                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
@@ -378,6 +390,7 @@ export default function App() {
                   </div>
                 </div>
               )}
+              
               <button onClick={handleGoToPista} disabled={isSavingProfile} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl flex justify-center items-center gap-2 uppercase tracking-widest active:scale-95 transition-all h-16">
                 {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : '¡A LA PISTA!'}
               </button>
@@ -386,7 +399,7 @@ export default function App() {
 
           {/* VISTA: DISCOVER (Pista) */}
           {view === 'discover' && (
-            <div className="h-full flex flex-col p-4 bg-stone-100 relative">
+            <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in slide-in-from-bottom duration-500">
               <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
                 <img src={PERFILES_MOCK[currentIndex].photo} className="absolute inset-0 w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
@@ -397,9 +410,9 @@ export default function App() {
                 </div>
               </div>
               <div className="flex justify-center items-center gap-4 py-6">
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90"><Beer className="w-8 h-8" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90"><X className="w-7 h-7" /></button>
-                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90"><Hand className="w-8 h-8" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"><Beer className="w-8 h-8" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 transition-transform"><X className="w-7 h-7" /></button>
+                <button onClick={() => setCurrentIndex(prev => (prev + 1) % 3)} className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"><Hand className="w-8 h-8" /></button>
               </div>
             </div>
           )}
@@ -414,7 +427,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Modal Recorte */}
+        {/* Modales */}
         {isCropping && (
           <div className="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md">
             <img src={tempPhoto} alt="Crop" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500 shadow-2xl" />
@@ -425,7 +438,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Modal QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
