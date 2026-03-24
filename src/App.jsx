@@ -11,7 +11,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 
-// ⚠️ IMPORTANTE: SUSTITUYE ESTO POR EL CÓDIGO QUE TE DIÓ FIREBASE EN LA PÁGINA WEB
 const firebaseConfig = {
   apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
   authDomain: "ligarey.firebaseapp.com",
@@ -68,13 +67,15 @@ const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1
 
 export default function App() {
   // --- ESTADOS ---
-  const [view, setView] = useState('welcome'); // welcome, auth, register, discover, matches, chat
-  const [authMode, setAuthMode] = useState('login'); // login, register, forgot
+  const [view, setView] = useState('welcome');
+  const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [authError, setAuthError] = useState('');
+  
   const [currentUser, setCurrentUser] = useState(null); 
-  const [isInitializing, setIsInitializing] = useState(true); // <-- NUEVO: Pantalla de carga mientras comprobamos la sesión
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(false); // Estado para el spinner del botón
 
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
@@ -87,7 +88,7 @@ export default function App() {
   
   const [tempPhoto, setTempPhoto] = useState(null);
   const [isCropping, setIsCropping] = useState(false);
-  const [photoError, setPhotoError] = useState(''); // <-- NUEVO: Estado para el error de la foto
+  const [photoError, setPhotoError] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [matches, setMatches] = useState([]); 
   const [activeChatId, setActiveChatId] = useState(null);
@@ -106,116 +107,102 @@ export default function App() {
     }
   }, [messages, view, activeChatId]);
 
-  // --- NUEVO: AUTO-LOGIN Y CARGA DE DATOS (VERSIÓN ANTI-BLOQUEOS) ---
+  // --- AUTO-LOGIN Y CARGA ROBUSTA ---
   useEffect(() => {
-    // ⏱️ SISTEMA DE EMERGENCIA: Si Firebase tarda más de 5 segundos, rompemos la pantalla de carga
-    const emergencyTimer = setTimeout(() => {
-      console.warn("La conexión tardó demasiado. Forzando entrada...");
+    const fallbackTimer = setTimeout(() => {
       setIsInitializing(false);
     }, 5000);
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Pedimos los datos a la base de datos (usando Promesas para que no se atasque)
-        getDoc(doc(db, 'usuarios', user.uid))
-          .then((docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              setMyProfile({
-                name: data.name || '',
-                photo: data.photo || null,
-                phrase: data.phrase || '',
-                lookingFor: data.lookingFor || '',
-                interests: data.interests || []
-              });
-
-              // Si ya tiene nombre, va a la pista. Si no, a terminar el perfil.
-              if (data.name) {
-                setView('discover');
-              } else {
-                setView('register');
-              }
-            } else {
-               setView('register');
-            }
-          })
-          .catch((error) => {
-            console.error("Error cargando perfil", error);
-            setView('register'); // Si falla la red, te dejamos en tu perfil
-          })
-          .finally(() => {
-            // Cuando termine (bien o mal), apagamos el cronómetro y la pantalla de carga
-            clearTimeout(emergencyTimer);
-            setIsInitializing(false); 
-          });
+        try {
+          const docSnap = await Promise.race([
+            getDoc(doc(db, 'usuarios', user.uid)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+          ]);
+          
+          if (docSnap && docSnap.exists()) {
+            const data = docSnap.data();
+            setMyProfile({
+              name: data.name || '',
+              photo: data.photo || null,
+              phrase: data.phrase || '',
+              lookingFor: data.lookingFor || '',
+              interests: data.interests || []
+            });
+            setView(data.name ? 'discover' : 'register');
+          } else {
+            setView('register');
+          }
+        } catch (error) {
+          console.warn("Conexión lenta. Forzando entrada...", error);
+          setView('register');
+        }
       } else {
-        // Si no hay usuario logueado
         setView('welcome');
-        clearTimeout(emergencyTimer);
-        setIsInitializing(false);
       }
+      
+      clearTimeout(fallbackTimer);
+      setIsInitializing(false);
+      setIsAuthLoading(false); 
     });
 
     return () => {
       unsubscribe();
-      clearTimeout(emergencyTimer);
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
   // --- REGISTRO Y AUTH LOGIC ---
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    setAuthError(''); // Limpiar errores
+    setAuthError('');
+    setIsAuthLoading(true); // Enciende el circulito giratorio
     
     try {
       if (authMode === 'login') {
-        // Iniciar sesión real
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
-        // (Ya no cambiamos la vista aquí, lo hace automáticamente el useEffect de arriba)
       } else if (authMode === 'register') {
-        // 1. Crear usuario en la bóveda de Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
-        const user = userCredential.user;
         
-        // 2. Guardar el correo y el consentimiento de marketing en nuestra base de datos
-        await setDoc(doc(db, 'usuarios', user.uid), {
+        // Guardamos extra en segundo plano
+        setDoc(doc(db, 'usuarios', userCredential.user.uid), {
           email: authForm.email,
           aceptaMarketing: authForm.marketing,
           aceptaTerminos: authForm.terms,
           fechaRegistro: new Date().toISOString()
-        });
-        // (Ya no cambiamos la vista aquí, lo hace automáticamente el useEffect de arriba)
+        }).catch(err => console.error("Error guardando datos extra:", err));
+        
       } else if (authMode === 'forgot') {
-        // Mandar correo real de recuperación
         await sendPasswordResetEmail(auth, authForm.email);
-        setRecoveryMessage('Te hemos enviado un enlace de recuperación a tu correo electrónico.');
+        setRecoveryMessage('Te hemos enviado un enlace a tu correo.');
         setTimeout(() => {
           setRecoveryMessage('');
           setAuthMode('login');
         }, 4000);
+        setIsAuthLoading(false);
       }
     } catch (error) {
       console.error(error.code);
-      // Traducimos los errores de Firebase al español
       switch(error.code) {
         case 'auth/email-already-in-use': setAuthError('Este correo ya está registrado.'); break;
         case 'auth/invalid-credential': setAuthError('Correo o contraseña incorrectos.'); break;
-        case 'auth/weak-password': setAuthError('La contraseña debe tener al menos 6 caracteres.'); break;
-        default: setAuthError('Ha ocurrido un error. Revisa tus datos e inténtalo de nuevo.');
+        case 'auth/weak-password': setAuthError('Contraseña muy corta.'); break;
+        default: setAuthError('Ha ocurrido un error. Revisa tus datos.');
       }
+      setIsAuthLoading(false);
     }
   };
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
-    setPhotoError(''); // Limpiamos cualquier error previo
+    setPhotoError('');
     
     if (file) {
-      // Validamos el límite de tamaño: 800 KB (800 * 1024 bytes)
       if (file.size > 800 * 1024) {
-        setPhotoError('La foto pesa demasiado. Elige una de menos de 800KB (truco: hazle una captura de pantalla).');
-        return; // Detenemos la función aquí
+        setPhotoError('Foto muy pesada. Máx 800KB (truco: usa una captura de pantalla).');
+        return; 
       }
 
       const reader = new FileReader();
@@ -244,16 +231,11 @@ export default function App() {
     });
   };
 
-  // --- NUEVO: GUARDAR PERFIL EN FIREBASE ---
   const saveProfileAndGo = async () => {
-    // 1. Cambiamos de pantalla INSTANTÁNEAMENTE para no hacer esperar al usuario
     setView('discover');
-
-    // 2. Guardamos en la base de datos de Google en segundo plano
     if (currentUser) {
       try {
         const userRef = doc(db, 'usuarios', currentUser.uid);
-        // Usamos setDoc con { merge: true } (es más seguro y a prueba de fallos)
         await setDoc(userRef, {
           name: myProfile.name,
           photo: myProfile.photo,
@@ -262,17 +244,15 @@ export default function App() {
           interests: myProfile.interests
         }, { merge: true });
       } catch (error) {
-        console.error("Error al guardar el perfil:", error);
+        console.error("Error al guardar:", error);
       }
     }
   };
 
-  // --- NUEVO: CERRAR SESIÓN ---
   const handleLogout = async () => {
     try {
       await signOut(auth);
       setCurrentUser(null);
-      // Limpiamos los datos del perfil en la memoria local
       setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
       setAuthForm({ email: '', password: '', terms: false, marketing: false });
       setView('welcome');
@@ -402,7 +382,7 @@ export default function App() {
                   className="mt-1 w-5 h-5 accent-rose-500 shrink-0 cursor-pointer" 
                 />
                 <span className="text-sm text-stone-600 group-hover:text-stone-900 transition-colors">
-                  Acepto la <strong className="text-stone-800">Política de Privacidad</strong> y prometo mantener el respeto en la app.
+                  Acepto la <strong className="text-stone-800">Política de Privacidad</strong> y mantendré el respeto.
                 </span>
               </label>
               <div className="h-px bg-stone-100 w-full my-2"></div>
@@ -414,7 +394,7 @@ export default function App() {
                   className="mt-1 w-5 h-5 accent-rose-500 shrink-0 cursor-pointer" 
                 />
                 <span className="text-sm text-stone-600 group-hover:text-stone-900 transition-colors">
-                  Quiero recibir descuentos, noticias de próximos festivales y eventos exclusivos. 🎟️
+                  Quiero recibir descuentos y noticias de eventos exclusivos. 🎟️
                 </span>
               </label>
             </div>
@@ -434,7 +414,7 @@ export default function App() {
             className="w-full py-4 mt-6 rounded-full bg-stone-900 text-white font-bold text-lg shadow-xl active:scale-95 hover:bg-rose-500 transition-all flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isAuthLoading ? (
-              <span className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></span>
+              <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
             ) : (
               <>
                 {authMode === 'login' && 'Entrar a la pista'}
@@ -487,7 +467,6 @@ export default function App() {
             </div>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
             
-            {/* NUEVO: Mostrar el mensaje de error o el límite */}
             {photoError ? (
               <div className="mt-3 p-2 bg-red-50 text-red-600 text-xs font-bold rounded-lg border border-red-100 flex items-start gap-1 max-w-[200px] text-center animate-in zoom-in">
                 <X className="w-4 h-4 shrink-0" /> {photoError}
@@ -618,7 +597,6 @@ export default function App() {
   const ChatView = () => {
     const match = matches.find(m => m.id === activeChatId);
     
-    // Safety fallback if no match is selected but view is accessed
     if (!match) {
       return (
         <div className="h-full flex flex-col items-center justify-center bg-stone-50">
@@ -675,7 +653,6 @@ export default function App() {
     );
   };
 
-  // --- NUEVO: PANTALLA DE CARGA INICIAL ---
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center">
@@ -730,7 +707,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Modal del Código QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in duration-300">
@@ -754,7 +730,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Modal de Ayuda */}
         {showHelpModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full relative shadow-2xl animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
