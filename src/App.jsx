@@ -16,8 +16,7 @@ import {
   signOut, 
   setPersistence, 
   browserLocalPersistence,
-  deleteUser,
-  signInAnonymously
+  deleteUser
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -34,11 +33,24 @@ import {
   orderBy
 } from 'firebase/firestore';
 
-const firebaseConfig = JSON.parse(__firebase_config);
+// Claves hardcoded para evitar pantalla blanca en local
+const firebaseConfig = {
+  apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
+  authDomain: "ligarey.firebaseapp.com",
+  projectId: "ligarey",
+  storageBucket: "ligarey.firebasestorage.app",
+  messagingSenderId: "625102595981",
+  appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4",
+  measurementId: "G-ZYLWEZX85C"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'ligarey-prod';
+const appId = 'ligarey-festival-prod';
+
+// Forzar persistencia para evitar cierres de sesión al refrescar
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- CONSTANTES ---
 const INTERESES_COMUNES = [
@@ -64,7 +76,7 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Estado del perfil
+  // Estado del perfil con campos obligatorios
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true 
   });
@@ -96,7 +108,7 @@ export default function App() {
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Colecciones según Regla 1
+  // Rutas blindadas
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
@@ -105,37 +117,46 @@ export default function App() {
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, view]);
 
-  // --- INICIO Y AUTH ---
+  // --- CONTROL DE INICIO ---
   useEffect(() => {
-    const initAuth = async () => {
-      onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          setCurrentUser(user);
-          try {
-            const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
-            if (userDoc.exists()) {
-              const data = userDoc.data();
-              setMyProfile(prev => ({ ...prev, ...data }));
-              if (!data.name || !data.photo || !data.phrase || !data.lookingFor) {
-                setView('register');
-              } else if (view === 'welcome' || view === 'auth') {
-                setView('discover');
-              }
-            } else {
+    const timer = setTimeout(() => setIsInitializing(false), 5000);
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        try {
+          const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setMyProfile(prev => ({ ...prev, ...data }));
+            // Si el perfil está incompleto, forzar registro
+            if (!data.name || !data.photo || !data.phrase || !data.lookingFor) {
               setView('register');
+            } else if (view === 'welcome' || view === 'auth') {
+              setView('discover');
             }
-          } catch (e) { setView('register'); }
-        } else {
-          setCurrentUser(null);
-          setView('welcome');
+          } else {
+            setView('register');
+          }
+        } catch (e) {
+          console.error("Error cargando perfil:", e);
+          setView('register');
         }
-        setIsInitializing(false);
-      });
+      } else {
+        setCurrentUser(null);
+        setView('welcome');
+      }
+      clearTimeout(timer);
+      setIsInitializing(false);
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
     };
-    initAuth();
   }, []);
 
-  // --- ESCUCHADORES (Realtime) ---
+  // --- ESCUCHADORES REALTIME ---
   useEffect(() => {
     if (!currentUser) return;
 
@@ -160,7 +181,7 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Error matches:", err));
+    });
 
     const unsubChats = onSnapshot(chatsCol, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -179,14 +200,14 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Error chats:", err));
+    });
 
     return () => { unsubMatches(); unsubChats(); };
   }, [currentUser, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR CHATS Y PISTA ---
+  // --- CARGAR PISTA Y CHATS ---
   useEffect(() => {
-    if (!currentUser || (view !== 'discover' && view !== 'messages')) return;
+    if (!currentUser || (view !== 'discover' && view !== 'messages' && view !== 'chat')) return;
 
     const fetchData = async () => {
       try {
@@ -216,7 +237,7 @@ export default function App() {
           });
           setProfiles(list.length > 0 ? list : PERFILES_MOCK);
         }
-      } catch (e) { console.error("Error fetching data:", e); }
+      } catch (e) { console.error("Error carga:", e); }
     };
     fetchData();
   }, [currentUser, view, notifications]);
@@ -255,42 +276,74 @@ export default function App() {
         setView('register');
       }
     } catch (error) {
-      if (error.code === 'auth/email-already-in-use') setAuthError('Este email ya está en uso.');
-      else if (error.code === 'auth/weak-password') setAuthError('Contraseña demasiado corta (mín. 6).');
-      else setAuthError('Error: Revisa tus datos.');
+      setAuthError('Error de acceso. Comprueba tus datos.');
     } finally { setIsAuthLoading(false); }
   };
 
   const saveProfileData = async () => {
     if (!currentUser) return false;
     if (!myProfile.name.trim() || !myProfile.photo || !myProfile.phrase.trim() || !myProfile.lookingFor.trim() || myProfile.interests.length === 0) {
-      setPhotoError('¡Nombre, Foto, Frase, Busco e Intereses son obligatorios!');
+      setPhotoError('¡Faltan datos! Nombre, Foto, Frase, Busco e Intereses son OBLIGATORIOS.');
       return false;
     }
     setIsSavingProfile(true);
     try {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid), { ...myProfile }, { merge: true });
-      setSaveMessage('¡Perfil guardado!');
+      setSaveMessage('¡Perfil actualizado!');
       setTimeout(() => setSaveMessage(''), 2000);
       setPhotoError('');
       return true;
-    } catch (e) { setPhotoError('Error al guardar. La foto es muy grande.'); return false; }
+    } catch (e) { setPhotoError('Error al guardar.'); return false; }
     finally { setIsSavingProfile(false); }
   };
 
   const handleGoToPista = async () => {
-    const success = await saveProfileData();
-    if (success) setView('discover');
+    const ok = await saveProfileData();
+    if (ok) setView('discover');
+  };
+
+  const deleteConversation = async (otherUserId) => {
+    const q = query(matchesCol);
+    const snap = await getDocs(q);
+    const delPromises = [];
+    snap.forEach((document) => {
+      const d = document.data();
+      if ((d.from === currentUser.uid && d.to === otherUserId) || (d.to === currentUser.uid && d.from === otherUserId)) {
+        delPromises.push(deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'matches', document.id)));
+      }
+    });
+    await Promise.all(delPromises);
+    setActiveChatUser(null);
+    setView('messages');
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setCurrentUser(null);
+    setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true });
+    setView('welcome');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid));
+      await deleteUser(auth.currentUser);
+      handleLogout();
+    } catch (e) { setAuthError('Re-autentícate para borrar cuenta.'); }
   };
 
   const handleMatchAction = async (type) => {
     if (showMatchAnimation) return;
     const target = profiles[currentIndex];
+    if (!target) return;
+
     if (target.isAlreadyMatched && type !== 'dislike') {
         setActiveChatUser(target);
         setView('chat');
         return;
     }
+
     setShowMatchAnimation(type);
     if (type !== 'dislike' && currentUser && target && !target.id.startsWith('m')) {
       await addDoc(matchesCol, { 
@@ -303,12 +356,20 @@ export default function App() {
     }, type === 'dislike' ? 300 : 1500);
   };
 
-  if (isInitializing) return <div className="min-h-screen bg-stone-900 flex items-center justify-center"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /></div>;
+  // --- PANTALLA DE CARGA ---
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4">
+        <Crown className="w-20 h-20 text-rose-500 animate-pulse" />
+        <p className="text-stone-400 font-black text-xs uppercase tracking-[0.3em]">Cargando LigaRey...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       
-      {/* NOTIFICACIÓN TOAST */}
+      {/* TOAST NOTIFICACIÓN */}
       {newNotificationToast && (
         <div 
           onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }}
@@ -319,8 +380,8 @@ export default function App() {
               {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5" />}
             </div>
             <div className="flex-1">
-              <p className="text-[9px] font-black uppercase text-rose-400">Notificación VIP</p>
-              <p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? 'te escribió' : 'te saludó'}</p>
+              <p className="text-[9px] font-black uppercase text-rose-400">Aviso VIP</p>
+              <p className="text-xs font-bold"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? 'te escribió' : 'te saludó'}</p>
             </div>
           </div>
         </div>
@@ -352,7 +413,7 @@ export default function App() {
         {/* CABECERA */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
-            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase">LigaRey</h1></div>
+            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
             <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> DESCUENTO REY</button>
           </div>
         )}
@@ -360,43 +421,44 @@ export default function App() {
         <div className="flex-1 overflow-hidden relative">
           
           {view === 'welcome' && (
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in duration-500">
+            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
-              <h1 className="text-5xl font-black text-stone-900 tracking-tighter uppercase leading-none">LigaRey</h1>
+              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
               <div className="w-full max-w-xs space-y-4 pt-4">
-                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta</button>
-                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs">Entrar</button>
+                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Empezar ahora</button>
+                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all">Entrar</button>
               </div>
             </div>
           )}
 
           {view === 'auth' && (
             <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right">
-              <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
-              <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? 'Hola!' : 'Registro'}</h2>
-              {authError && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4" /> {authError}</div>}
+              <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
+              <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? 'Hola!' : 'VIP'}</h2>
+              {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2 animate-in slide-in-from-top"><AlertCircle className="w-4 h-4" /> {authError}</p>}
               <form onSubmit={handleAuthSubmit} className="space-y-4">
-                <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
-                <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
-                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 flex items-center justify-center">
+                <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
+                <input type="password" required placeholder="Contraseña" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
+                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 transition-all flex justify-center items-center">
                    {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? 'ENTRAR' : 'REGISTRARSE')}
                 </button>
               </form>
+              <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-6 text-stone-500 text-xs font-bold uppercase tracking-widest">{authMode === 'login' ? '¿No tienes cuenta? Únete' : '¿Ya tienes cuenta? Entra'}</button>
             </div>
           )}
 
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
-              <h2 className="text-2xl font-black text-center mb-6 uppercase tracking-tighter">Mi Cuenta</h2>
+              <h2 className="text-2xl font-black text-center mb-6 uppercase tracking-tighter">Mi Cuenta VIP</h2>
               <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner">
-                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-50'}`}>DATOS</button>
+                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>DATOS</button>
                 <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>PREVIA</button>
               </div>
               
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
@@ -404,39 +466,44 @@ export default function App() {
                       reader.onloadend = () => setMyProfile({...myProfile, photo: reader.result});
                       if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
                     }} className="hidden" />
-                    {photoError && <p className="text-red-500 text-[10px] font-bold mt-2 text-center bg-red-50 p-2 rounded-lg">{photoError}</p>}
+                    {photoError && <p className="text-red-500 text-[10px] font-bold mt-2 text-center bg-red-50 p-2 rounded-lg border border-red-100">{photoError}</p>}
                   </div>
-                  <input type="text" placeholder="Nombre (Obligatorio)" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400" />
-                  <input type="text" placeholder="Frase favorita (Obligatorio)" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none italic" />
-                  <textarea placeholder="ESTOY BUSCANDO: (Obligatorio)" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none h-20" />
+                  
+                  <div className="space-y-4">
+                    <input type="text" placeholder="Nombre (Obligatorio)" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
+                    <input type="text" placeholder="Frase favorita (Obligatorio)" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm italic" />
+                    <textarea placeholder="ESTOY BUSCANDO: (Obligatorio)" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none h-20 focus:border-rose-400 shadow-sm" />
+                  </div>
+
                   <div className="flex flex-wrap gap-2">
                     {INTERESES_COMUNES.slice(0, 10).map(int => (
                       <button key={int} onClick={() => {
                         const list = myProfile.interests.includes(int) ? myProfile.interests.filter(i => i !== int) : [...myProfile.interests, int].slice(0, 5);
                         setMyProfile({...myProfile, interests: list});
-                      }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white text-stone-500'}`}>{int}</button>
+                      }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
                     ))}
                   </div>
+
                   <div className="pt-6 space-y-3">
                     {saveMessage && <p className="text-green-600 text-center font-bold text-xs">{saveMessage}</p>}
                     <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95">Guardar Cambios</button>
-                    <button onClick={() => signOut(auth).then(() => setView('welcome'))} className="w-full text-stone-400 font-black text-[10px] uppercase py-2">Cerrar Sesión</button>
-                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-red-500 font-black text-[10px] uppercase py-2">Eliminar Cuenta</button>
+                    <button onClick={handleLogout} className="w-full text-stone-400 font-black text-[10px] uppercase py-2 active:opacity-50">Cerrar Sesión</button>
+                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-red-500 font-black text-[10px] uppercase py-2 active:opacity-50">Eliminar Cuenta</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200">
+                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-black tracking-tighter mb-1">{myProfile.name || 'Sin nombre'}</h2>
+                    <h2 className="text-3xl font-black tracking-tighter mb-1 leading-none">{myProfile.name || 'Sin nombre'}</h2>
                     <p className="text-rose-300 font-bold mb-1 italic">"{myProfile.phrase || 'Tu frase'}"</p>
-                    <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-3">Busco: {myProfile.lookingFor || '...'}</p>
-                    <div className="flex flex-wrap gap-2">{(myProfile.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold">{i}</span>)}</div>
+                    <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-3 leading-none">Busco: {myProfile.lookingFor || '...'}</p>
+                    <div className="flex flex-wrap gap-2">{(myProfile.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                   </div>
                 </div>
               )}
-              <button onClick={handleGoToPista} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl h-16 active:scale-95">¡A LA PISTA!</button>
+              <button onClick={handleGoToPista} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all">¡A LA PISTA!</button>
             </div>
           )}
 
@@ -454,7 +521,8 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <div className={`flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-emerald-500 shadow-emerald-500/20' : 'border-stone-200'}`}>
+              
+              <div className={`flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 transition-all duration-500 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-emerald-500' : 'border-stone-200'}`}>
                 {profiles[currentIndex] ? (
                   <>
                     <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
@@ -469,21 +537,22 @@ export default function App() {
                         <h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>
                         {profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-emerald-400" />}
                       </div>
-                      <p className="text-rose-300 font-bold mb-1 italic">"{profiles[currentIndex]?.phrase || 'Hola!'}"</p>
+                      <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase || 'Hola!'}"</p>
                       <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-4">Busco: {profiles[currentIndex]?.lookingFor || 'Pasarlo bien'}</p>
                       <div className="flex flex-wrap gap-2">{(profiles[currentIndex]?.interests || []).map(i => <span key={i} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                     </div>
                   </>
                 ) : (
-                  <div className="flex items-center justify-center h-full text-stone-400 p-8 text-center font-bold italic">No hay más gente nueva por ahora.</div>
+                  <div className="flex items-center justify-center h-full text-stone-400 p-8 text-center font-bold italic opacity-40">No hay más gente nueva por ahora.</div>
                 )}
               </div>
+              
               <div className="flex justify-center items-center gap-4 py-6">
-                <button onClick={() => handleMatchAction('beer')} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500' : 'bg-amber-400'} text-white`}>
+                <button onClick={() => handleMatchAction('beer')} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500 shadow-emerald-500/30' : 'bg-amber-400 shadow-amber-400/30'} text-white`}>
                   {profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-8 h-8" /> : <Beer className="w-8 h-8 fill-current" />}
                 </button>
-                <button onClick={() => handleMatchAction('dislike')} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90"><X className="w-7 h-7" /></button>
-                <button onClick={() => handleMatchAction('hand')} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500' : 'bg-green-500'} text-white`}>
+                <button onClick={() => handleMatchAction('dislike')} className="w-14 h-14 rounded-full bg-white border-2 border-red-500 text-red-500 flex items-center justify-center shadow-lg active:scale-90 shadow-red-500/10"><X className="w-7 h-7" /></button>
+                <button onClick={() => handleMatchAction('hand')} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500 shadow-emerald-500/30' : 'bg-green-500 shadow-green-500/30'} text-white`}>
                   {profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-8 h-8" /> : <Hand className="w-8 h-8 fill-current" />}
                 </button>
               </div>
@@ -495,31 +564,35 @@ export default function App() {
               <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter">Mis Chats</h2>
               <div className="space-y-3">
                 {activeChats.map((chat) => (
-                  <div key={chat.id} onClick={() => { setActiveChatUser(chat); setView('chat'); }} className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 flex items-center gap-4 cursor-pointer active:scale-95">
+                  <div key={chat.id} onClick={() => { setActiveChatUser(chat); setView('chat'); }} className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 flex items-center gap-4 cursor-pointer active:scale-95 transition-all">
                     <img src={chat.photo || DEFAULT_AVATAR} className="w-14 h-14 rounded-full object-cover border-2 border-emerald-100" />
-                    <div className="flex-1"><p className="text-lg font-bold text-stone-800 tracking-tight">{chat.name}</p><p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Chat abierto</p></div>
+                    <div className="flex-1">
+                      <p className="text-lg font-bold text-stone-800 tracking-tight leading-none mb-1">{chat.name}</p>
+                      <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Chat abierto</p>
+                    </div>
                   </div>
                 ))}
+                {activeChats.length === 0 && <div className="mt-20 text-center opacity-30 px-8"><MessageCircle className="w-12 h-12 mx-auto mb-4" /><p className="text-sm font-bold uppercase tracking-widest">Aún no tienes chats</p></div>}
               </div>
             </div>
           )}
 
           {view === 'chat' && activeChatUser && (
             <div className="h-full flex flex-col bg-stone-50 animate-in slide-in-from-right">
-              <div className="p-4 bg-white border-b flex items-center justify-between z-10">
+              <div className="p-4 bg-white border-b flex items-center justify-between z-10 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <button onClick={() => setView('messages')} className="p-1"><ChevronLeft className="w-7 h-7 text-stone-400" /></button>
-                  <div onClick={() => setShowInspector(activeChatUser)} className="flex items-center gap-3 cursor-pointer">
+                  <button onClick={() => setView('messages')} className="p-1 active:scale-90 transition-transform"><ChevronLeft className="w-7 h-7 text-stone-400" /></button>
+                  <div onClick={() => setShowInspector(activeChatUser)} className="flex items-center gap-3 cursor-pointer active:opacity-60 transition-opacity">
                     <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-10 h-10 rounded-full object-cover" />
                     <div><h3 className="font-black text-stone-800 uppercase leading-none">{activeChatUser.name}</h3><p className="text-[9px] font-black uppercase text-rose-500 tracking-widest mt-1">Ver ficha VIP</p></div>
                   </div>
                 </div>
-                <button onClick={() => deleteConversation(activeChatUser.id)} className="p-2 text-stone-300 hover:text-red-500"><Trash2 className="w-5 h-5" /></button>
+                <button onClick={() => deleteConversation(activeChatUser.id)} className="p-2 text-stone-300 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
               </div>
               <div className="flex-1 p-4 overflow-y-auto space-y-4">
                 {chatMessages.map((m) => (
                   <div key={m.id} className={`flex ${m.from === currentUser.uid ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-4 rounded-3xl max-w-[80%] text-sm font-medium shadow-sm ${m.from === currentUser.uid ? 'bg-rose-500 text-white rounded-tr-none' : 'bg-white text-stone-700 rounded-tl-none'}`}>
+                    <div className={`p-4 rounded-3xl max-w-[80%] text-sm font-medium shadow-sm ${m.from === currentUser.uid ? 'bg-rose-500 text-white rounded-tr-none' : 'bg-white text-stone-700 rounded-tl-none border border-stone-100'}`}>
                       {m.text}
                     </div>
                   </div>
@@ -531,8 +604,8 @@ export default function App() {
                 addDoc(chatsCol, { from: currentUser.uid, fromName: myProfile.name, to: activeChatUser.id, text: newMessageText, timestamp: new Date().toISOString() });
                 setNewMessageText('');
               }} className="p-4 bg-white border-t flex gap-2">
-                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Mensaje..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none" />
-                <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90"><Send className="w-5 h-5 ml-1" /></button>
+                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder="Mensaje..." className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
+                <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg"><Send className="w-5 h-5 ml-1" /></button>
               </form>
             </div>
           )}
@@ -541,7 +614,7 @@ export default function App() {
             <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-3xl font-black uppercase tracking-tighter">Actividad</h2>
-                <button onClick={() => { setNotifications([]); setHasUnreadNotifs(false); }} className="p-2 text-stone-400 hover:text-rose-500 flex items-center gap-1">
+                <button onClick={() => { setNotifications([]); setHasUnreadNotifs(false); }} className="p-2 text-stone-400 hover:text-rose-500 transition-colors flex items-center gap-1">
                   <Eraser className="w-4 h-4" /><span className="text-[10px] font-black uppercase">Limpiar</span>
                 </button>
               </div>
@@ -575,13 +648,13 @@ export default function App() {
           </div>
         )}
 
-        {/* MODALES */}
+        {/* MODAL ELIMINACIÓN */}
         {showDeleteConfirm && (
           <div className="absolute inset-0 z-[600] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl">
               <div className="mx-auto w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4"><AlertCircle className="w-8 h-8" /></div>
-              <h3 className="text-2xl font-black text-stone-800 mb-2 uppercase">¿Eliminar cuenta?</h3>
-              <p className="text-stone-500 mb-8 text-sm italic">Esta acción es permanente e irreversible.</p>
+              <h3 className="text-2xl font-black text-stone-800 mb-2 uppercase">¿Seguro?</h3>
+              <p className="text-stone-500 mb-8 text-sm italic">Tu cuenta desaparecerá del festival para siempre.</p>
               <div className="space-y-3">
                 <button onClick={handleDeleteAccount} className="w-full py-4 rounded-full bg-red-500 text-white font-bold text-lg active:scale-95 transition-all">SÍ, BORRAR TODO</button>
                 <button onClick={() => setShowDeleteConfirm(false)} className="w-full py-4 rounded-full bg-stone-100 text-stone-800 font-bold text-lg active:scale-95 transition-all">CANCELAR</button>
@@ -593,10 +666,10 @@ export default function App() {
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in">
-              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase">Descuento Rey</h3>
+              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800 transition-colors"><X className="w-6 h-6" /></button>
+              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase font-black leading-none">Descuento Rey</h3>
               <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${currentUser?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply mx-auto mb-4" />
-              <p className="text-[10px] text-stone-500 uppercase font-black tracking-widest opacity-60">Barra principal</p>
+              <p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest opacity-60">Muestra en barra principal</p>
             </div>
           </div>
         )}
