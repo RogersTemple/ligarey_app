@@ -27,13 +27,22 @@ import {
   getDocs
 } from 'firebase/firestore';
 
-const firebaseConfig = JSON.parse(__firebase_config);
+// He vuelto a poner tus credenciales manuales para que funcione en tu ordenador local
+const firebaseConfig = {
+  apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
+  authDomain: "ligarey.firebaseapp.com",
+  projectId: "ligarey",
+  storageBucket: "ligarey.firebasestorage.app",
+  messagingSenderId: "625102595981",
+  appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4",
+  measurementId: "G-ZYLWEZX85C"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// Forzamos persistencia para que no olvide la sesión al cerrar el navegador o refrescar
+// Forzamos persistencia para que no olvide la sesión al refrescar
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- CONSTANTES ---
@@ -71,8 +80,6 @@ export default function App() {
     name: '', photo: null, phrase: '', lookingFor: '', interests: []
   });
   
-  const [tempPhoto, setTempPhoto] = useState(null);
-  const [isCropping, setIsCropping] = useState(false);
   const [photoError, setPhotoError] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveMessage, setSaveMessage] = useState(''); 
@@ -83,16 +90,17 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
-  // --- LÓGICA DE INICIO (FIJADA PARA EVITAR PANTALLA BLANCA) ---
+  // --- LÓGICA DE INICIO ---
   useEffect(() => {
-    // Temporizador de seguridad para que la app cargue sí o sí en 5 segundos
-    const safetyTimer = setTimeout(() => setIsInitializing(false), 5000);
+    // Si en 6 segundos no ha cargado, forzamos la entrada para evitar pantalla blanca
+    const timer = setTimeout(() => setIsInitializing(false), 6000);
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         try {
-          const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid));
+          // Buscamos tu perfil en la base de datos
+          const userDoc = await getDoc(doc(db, 'usuarios', user.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
             setMyProfile({
@@ -102,36 +110,35 @@ export default function App() {
               lookingFor: data.lookingFor || '',
               interests: data.interests || []
             });
-            // Si ya tiene perfil, lo mandamos a la pista automáticamente al arrancar
             if (data.name) setView('discover');
             else setView('register');
           } else {
             setView('register');
           }
-        } catch (e) { 
-          console.error("Error cargando perfil:", e);
+        } catch (e) {
+          console.error("Error al cargar datos:", e);
           setView('register');
         }
       } else {
         setCurrentUser(null);
         setView('welcome');
       }
-      clearTimeout(safetyTimer);
+      clearTimeout(timer);
       setIsInitializing(false);
     });
 
     return () => {
       unsubscribe();
-      clearTimeout(safetyTimer);
+      clearTimeout(timer);
     };
-  }, []); // [] para que solo se ejecute una vez al cargar la web
+  }, []);
 
-  // --- CARGAR USUARIOS REALES ---
+  // --- CARGAR OTROS USUARIOS REALES ---
   useEffect(() => {
     if (view === 'discover' && currentUser) {
-      const fetchRealUsers = async () => {
+      const fetchUsers = async () => {
         try {
-          const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'usuarios'));
+          const querySnapshot = await getDocs(collection(db, 'usuarios'));
           const realUsers = [];
           querySnapshot.forEach((doc) => {
             if (doc.id !== currentUser.uid) {
@@ -139,10 +146,12 @@ export default function App() {
               if (data.name) realUsers.push({ id: doc.id, ...data });
             }
           });
-          if (realUsers.length > 0) setProfiles(realUsers);
-        } catch (e) { console.error("Error cargando pista:", e); }
+          if (realUsers.length > 0) setProfiles([...realUsers, ...PERFILES_MOCK]);
+        } catch (e) {
+          console.error("Error cargando usuarios:", e);
+        }
       };
-      fetchRealUsers();
+      fetchUsers();
     }
   }, [view, currentUser]);
 
@@ -154,13 +163,12 @@ export default function App() {
     try {
       if (authMode === 'login') {
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
-        // El useEffect de arriba detectará el login y cambiará la vista
-      } else if (authMode === 'register') {
+      } else {
         const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', userCredential.user.uid), {
+        await setDoc(doc(db, 'usuarios', userCredential.user.uid), {
           email: authForm.email,
           fechaRegistro: new Date().toISOString()
-        }, { merge: true });
+        });
         setView('register');
       }
     } catch (error) {
@@ -174,7 +182,7 @@ export default function App() {
     setIsSavingProfile(true);
     setPhotoError('');
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid), {
+      await setDoc(doc(db, 'usuarios', currentUser.uid), {
         name: myProfile.name,
         photo: myProfile.photo,
         phrase: myProfile.phrase,
@@ -184,52 +192,34 @@ export default function App() {
       setSaveMessage('¡Perfil guardado!');
       setTimeout(() => setSaveMessage(''), 3000);
       return true;
-    } catch (e) { 
-      setPhotoError('Error al guardar. La foto puede ser muy grande.'); 
-      return false; 
+    } catch (e) {
+      setPhotoError('Error al guardar. La foto puede ser muy pesada.');
+      return false;
     } finally { setIsSavingProfile(false); }
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setCurrentUser(null);
-      setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
-      setAuthForm({ email: '', password: '' });
-      setView('welcome');
-    } catch (e) { console.error("Error al salir:", e); }
+    await signOut(auth);
+    // Reiniciamos todo para que parezca una app recién abierta
+    setCurrentUser(null);
+    setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [] });
+    setView('welcome');
   };
 
-  const toggleInterest = (interest) => {
-    setMyProfile(prev => {
-      const interests = prev.interests.includes(interest)
-        ? prev.interests.filter(i => i !== interest)
-        : prev.interests.length < 5 ? [...prev.interests, interest] : prev.interests;
-      return { ...prev, interests };
-    });
-  };
-
-  const handleGoToPista = async () => {
-    if (!myProfile.name.trim()) { setPhotoError('El nombre es obligatorio.'); return; }
-    const ok = await saveProfileData();
-    if (ok) setView('discover');
-  };
-
-  // --- PANTALLA DE CARGA ---
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-stone-900 flex flex-col justify-center items-center gap-4">
         <Crown className="w-16 h-16 text-rose-500 animate-pulse" />
-        <p className="text-stone-400 font-bold tracking-widest text-xs uppercase">Cargando LigaRey...</p>
+        <p className="text-stone-400 font-bold text-xs uppercase tracking-widest">Entrando en LigaRey...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
+    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans">
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* Cabecera */}
+        {/* CABECERA */}
         {view !== 'welcome' && view !== 'auth' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
             <div className="flex items-center gap-2">
@@ -244,30 +234,30 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative">
           
-          {/* BIENVENIDA */}
+          {/* VISTA: BIENVENIDA */}
           {view === 'welcome' && (
-            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50 animate-in fade-in duration-500">
-              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50">
+              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-in zoom-in">
                 <Crown className="text-white w-16 h-16" />
               </div>
               <div className="space-y-2">
                 <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-600 to-orange-500 pb-2">LigaRey</h1>
                 <p className="text-stone-500 italic font-medium">Encuentra nuevos amigos</p>
               </div>
-              <div className="w-full max-w-xs space-y-4">
+              <div className="w-full max-w-xs space-y-4 pt-4">
                 <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear una cuenta</button>
                 <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold active:scale-95 transition-all">Ya tengo cuenta</button>
               </div>
             </div>
           )}
 
-          {/* AUTH */}
+          {/* VISTA: AUTH (LOGIN/REGISTRO) */}
           {view === 'auth' && (
-            <div className="h-full flex flex-col p-6 bg-stone-50 animate-in slide-in-from-right duration-300">
+            <div className="h-full flex flex-col p-6 bg-stone-50 animate-in slide-in-from-right">
               <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
               <div className="max-w-sm w-full mx-auto">
                 <h2 className="text-4xl font-black text-stone-900 mb-2 tracking-tighter">{authMode === 'login' ? 'Bienvenido' : 'Únete al VIP'}</h2>
-                <p className="text-stone-500 mb-8 text-sm">{authMode === 'login' ? 'Inicia sesión para entrar en la pista.' : 'Regístrate gratis y conoce gente hoy.'}</p>
+                <p className="text-stone-500 mb-8 text-sm">{authMode === 'login' ? 'Entra para ver quién está en la pista.' : 'Regístrate gratis para empezar.'}</p>
                 {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100">{authError}</p>}
                 <form onSubmit={handleAuthSubmit} className="space-y-4">
                   <input type="email" required placeholder="Email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500" />
@@ -281,7 +271,7 @@ export default function App() {
             </div>
           )}
 
-          {/* PERFIL */}
+          {/* VISTA: PERFIL (REGISTRO DE DATOS) */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Mi Perfil</h2>
@@ -301,11 +291,11 @@ export default function App() {
                       const file = e.target.files[0];
                       if (file && file.size <= 400 * 1024) {
                         const reader = new FileReader();
-                        reader.onloadend = () => { setTempPhoto(reader.result); setIsCropping(true); };
+                        reader.onloadend = () => { setMyProfile({...myProfile, photo: reader.result}); };
                         reader.readAsDataURL(file);
-                      } else { setPhotoError('La foto pesa demasiado. Máximo 400KB.'); }
+                      } else { setPhotoError('La foto pesa demasiado. Máx 400KB.'); }
                     }} className="hidden" />
-                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Foto máx 400KB'}</p>
+                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Sube una foto (Máx 400KB)'}</p>
                   </div>
 
                   <div className="space-y-4">
@@ -316,7 +306,12 @@ export default function App() {
 
                   <div className="flex flex-wrap gap-2">
                     {INTERESES_COMUNES.slice(0, 15).map(int => (
-                      <button key={int} onClick={() => toggleInterest(int)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
+                      <button key={int} onClick={() => {
+                        const interests = myProfile.interests.includes(int)
+                          ? myProfile.interests.filter(i => i !== int)
+                          : myProfile.interests.length < 5 ? [...myProfile.interests, int] : myProfile.interests;
+                        setMyProfile({...myProfile, interests});
+                      }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
                     ))}
                   </div>
 
@@ -325,11 +320,11 @@ export default function App() {
                     <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all text-xs">
                       {isSavingProfile ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR PERFIL'}
                     </button>
-                    <button onClick={handleLogout} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50">Cerrar Sesión</button>
+                    <button onClick={handleLogout} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2 active:opacity-50 transition-opacity">Cerrar Sesión</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200">
+                <div className="flex-1 min-h-[400px] relative rounded-[2rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
                   {myProfile.photo ? <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" /> : <div className="absolute inset-0 flex items-center justify-center text-stone-400"><Camera className="w-12 h-12" /></div>}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
@@ -339,17 +334,21 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <button onClick={handleGoToPista} disabled={isSavingProfile} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl flex justify-center items-center gap-2 uppercase tracking-widest active:scale-95 transition-all h-16">
+              <button onClick={async () => {
+                if (!myProfile.name.trim()) { setPhotoError('El nombre es obligatorio.'); return; }
+                const ok = await saveProfileData();
+                if (ok) setView('discover');
+              }} disabled={isSavingProfile} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl flex justify-center items-center gap-2 uppercase tracking-widest active:scale-95 transition-all h-16">
                 {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : '¡A LA PISTA!'}
               </button>
             </div>
           )}
 
-          {/* DISCOVER */}
-          {view === 'discover' && profiles.length > 0 && (
-            <div className="h-full flex flex-col p-4 bg-stone-100 relative">
+          {/* VISTA: DISCOVER (LA PISTA) */}
+          {view === 'discover' && (
+            <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in slide-in-from-bottom">
               <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
-                <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
+                <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover shadow-inner" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                 <div className="absolute bottom-0 p-6 text-white w-full">
                   <div className="flex items-center gap-2 mb-1">
@@ -371,7 +370,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Navegación Inferior */}
+        {/* NAVEGACIÓN INFERIOR */}
         {['discover', 'register'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
@@ -380,18 +379,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Modal Recorte */}
-        {isCropping && (
-          <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in">
-            <img src={tempPhoto} alt="Crop" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500 shadow-2xl" />
-            <div className="flex gap-4 w-full max-w-xs">
-              <button onClick={() => setIsCropping(false)} className="flex-1 py-4 bg-white/10 text-white rounded-2xl font-bold">CANCELAR</button>
-              <button onClick={() => { setMyProfile(p => ({...p, photo: tempPhoto})); setIsCropping(false); }} className="flex-1 py-4 bg-rose-500 text-white rounded-2xl font-bold">ACEPTAR</button>
-            </div>
-          </div>
-        )}
-
-        {/* Modal QR */}
+        {/* MODAL QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
