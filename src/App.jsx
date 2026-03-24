@@ -6,6 +6,26 @@ import {
   Mail, Lock, ArrowRight, KeyRound
 } from 'lucide-react';
 
+// --- CONFIGURACIÓN DE FIREBASE ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
+
+// ⚠️ IMPORTANTE: SUSTITUYE ESTO POR EL CÓDIGO QUE TE DIÓ FIREBASE EN LA PÁGINA WEB
+const firebaseConfig = {
+  apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
+  authDomain: "ligarey.firebaseapp.com",
+  projectId: "ligarey",
+  storageBucket: "ligarey.firebasestorage.app",
+  messagingSenderId: "625102595981",
+  appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4",
+  measurementId: "G-ZYLWEZX85C"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
 // --- CONSTANTES Y MOCKS ---
 const INTERESES_COMUNES = [
   "Rock", "Pop", "Indie", "Reggaetón", "Electrónica", "Trap", "Metal",
@@ -52,6 +72,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState('login'); // login, register, forgot
   const [authForm, setAuthForm] = useState({ email: '', password: '', terms: false, marketing: false });
   const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [authError, setAuthError] = useState('');
 
   const [profileMode, setProfileMode] = useState('edit');
   const [myProfile, setMyProfile] = useState({
@@ -83,18 +104,47 @@ export default function App() {
   }, [messages, view, activeChatId]);
 
   // --- REGISTRO Y AUTH LOGIC ---
-  const handleAuthSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    if (authMode === 'login') {
-      setView('discover'); // Simulamos que el login es correcto
-    } else if (authMode === 'register') {
-      setView('register'); // Pasa a crear el perfil visual
-    } else if (authMode === 'forgot') {
-      setRecoveryMessage('Te hemos enviado un enlace de recuperación a tu correo electrónico.');
-      setTimeout(() => {
-        setRecoveryMessage('');
-        setAuthMode('login');
-      }, 4000);
+    setAuthError(''); // Limpiar errores
+    
+    try {
+      if (authMode === 'login') {
+        // Iniciar sesión real
+        await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
+        setView('discover'); 
+      } else if (authMode === 'register') {
+        // 1. Crear usuario en la bóveda de Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
+        const user = userCredential.user;
+        
+        // 2. Guardar el correo y el consentimiento de marketing en nuestra base de datos (Firestore)
+        await setDoc(doc(db, 'usuarios', user.uid), {
+          email: authForm.email,
+          aceptaMarketing: authForm.marketing,
+          aceptaTerminos: authForm.terms,
+          fechaRegistro: new Date().toISOString()
+        });
+        
+        setView('register'); 
+      } else if (authMode === 'forgot') {
+        // Mandar correo real de recuperación
+        await sendPasswordResetEmail(auth, authForm.email);
+        setRecoveryMessage('Te hemos enviado un enlace de recuperación a tu correo electrónico.');
+        setTimeout(() => {
+          setRecoveryMessage('');
+          setAuthMode('login');
+        }, 4000);
+      }
+    } catch (error) {
+      console.error(error.code);
+      // Traducimos los errores de Firebase al español
+      switch(error.code) {
+        case 'auth/email-already-in-use': setAuthError('Este correo ya está registrado.'); break;
+        case 'auth/invalid-credential': setAuthError('Correo o contraseña incorrectos.'); break;
+        case 'auth/weak-password': setAuthError('La contraseña debe tener al menos 6 caracteres.'); break;
+        default: setAuthError('Ha ocurrido un error. Revisa tus datos e inténtalo de nuevo.');
+      }
     }
   };
 
@@ -200,6 +250,13 @@ export default function App() {
           <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in fade-in">
             <Check className="w-5 h-5" />
             {recoveryMessage}
+          </div>
+        )}
+
+        {authError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in fade-in">
+            <X className="w-5 h-5 shrink-0" />
+            {authError}
           </div>
         )}
 
