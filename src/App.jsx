@@ -276,6 +276,57 @@ export default function App() {
     } finally { setIsAuthLoading(false); }
   };
 
+  // --- NUOVA FUNZIONE PER COMPRIMERE LA FOTO (Adatta immagini grandi al limite di 1MB) ---
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Aumentiamo la risoluzione a 800x800 per una migliore qualità visiva
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Comprime l'immagine partendo da qualità 0.85
+        let quality = 0.85;
+        let compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+
+        // Firebase Firestore ha un limite rigoroso di 1MB per documento.
+        // Se la stringa supera gli 800.000 caratteri (~800KB), riduciamo la qualità dinamicamente.
+        while (compressedBase64.length > 800000 && quality > 0.3) {
+          quality -= 0.1;
+          compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        setMyProfile({...myProfile, photo: compressedBase64});
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const saveProfileData = async () => {
     if (!user) return false;
     if (!myProfile.name?.trim()) { setPhotoError('El nombre es obligatorio.'); return false; }
@@ -291,7 +342,8 @@ export default function App() {
       setTimeout(() => setSaveMessage(''), 2000);
       return true;
     } catch (e) { 
-      setPhotoError('Error en permisos Firebase al guardar.'); 
+      console.error(e);
+      setPhotoError('Hubo un error al guardar los datos de tu perfil.'); 
       return false; 
     }
     finally { setIsSavingProfile(false); }
@@ -440,14 +492,10 @@ export default function App() {
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400">
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-colors">
                       {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
-                    <input type="file" accept="image/*" ref={fileInputRef} onChange={(e) => {
-                      const reader = new FileReader();
-                      reader.onloadend = () => setMyProfile({...myProfile, photo: reader.result});
-                      if(e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
-                    }} className="hidden" />
+                    <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
                     {photoError && <p className="text-red-500 text-[10px] font-bold mt-2 text-center bg-red-50 p-2 rounded-lg border border-red-100">{photoError}</p>}
                   </div>
                   <input type="text" placeholder="Tu nombre (Obligatorio)" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
