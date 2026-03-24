@@ -430,12 +430,19 @@ export default function App() {
 
           <button 
             type="submit" 
-            className="w-full py-4 mt-6 rounded-full bg-stone-900 text-white font-bold text-lg shadow-xl active:scale-95 hover:bg-rose-500 transition-all flex items-center justify-center gap-2 group"
+            disabled={isAuthLoading}
+            className="w-full py-4 mt-6 rounded-full bg-stone-900 text-white font-bold text-lg shadow-xl active:scale-95 hover:bg-rose-500 transition-all flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {authMode === 'login' && 'Entrar a la pista'}
-            {authMode === 'register' && 'Crear cuenta'}
-            {authMode === 'forgot' && 'Enviar enlace'}
-            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            {isAuthLoading ? (
+              <span className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></span>
+            ) : (
+              <>
+                {authMode === 'login' && 'Entrar a la pista'}
+                {authMode === 'register' && 'Crear cuenta'}
+                {authMode === 'forgot' && 'Enviar enlace'}
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </>
+            )}
           </button>
         </form>
 
