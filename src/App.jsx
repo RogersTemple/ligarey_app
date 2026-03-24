@@ -89,6 +89,8 @@ export default function App() {
   const [tempPhoto, setTempPhoto] = useState(null);
   const [isCropping, setIsCropping] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false); // <-- NUEVO: Estado del botón guardar
+  const [saveMessage, setSaveMessage] = useState(''); // <-- NUEVO: Mensaje de éxito
   const [currentIndex, setCurrentIndex] = useState(0);
   const [matches, setMatches] = useState([]); 
   const [activeChatId, setActiveChatId] = useState(null);
@@ -200,8 +202,9 @@ export default function App() {
     setPhotoError('');
     
     if (file) {
-      if (file.size > 800 * 1024) {
-        setPhotoError('Foto muy pesada. Máx 800KB (truco: usa una captura de pantalla).');
+      // REDUCIDO A 500KB para evitar el límite de 1MB de Firebase al convertir a Base64
+      if (file.size > 500 * 1024) {
+        setPhotoError('Foto muy pesada. Máx 500KB (truco: usa una captura de pantalla).');
         return; 
       }
 
@@ -231,21 +234,29 @@ export default function App() {
     });
   };
 
-  const saveProfileAndGo = async () => {
-    setView('discover');
-    if (currentUser) {
-      try {
-        const userRef = doc(db, 'usuarios', currentUser.uid);
-        await setDoc(userRef, {
-          name: myProfile.name,
-          photo: myProfile.photo,
-          phrase: myProfile.phrase,
-          lookingFor: myProfile.lookingFor,
-          interests: myProfile.interests
-        }, { merge: true });
-      } catch (error) {
-        console.error("Error al guardar:", error);
-      }
+  // --- NUEVO: FUNCIÓN EXPLÍCITA DE GUARDADO ---
+  const saveProfileOnly = async () => {
+    if (!currentUser) return;
+    setIsSavingProfile(true);
+    setPhotoError('');
+    
+    try {
+      const userRef = doc(db, 'usuarios', currentUser.uid);
+      await setDoc(userRef, {
+        name: myProfile.name,
+        photo: myProfile.photo,
+        phrase: myProfile.phrase,
+        lookingFor: myProfile.lookingFor,
+        interests: myProfile.interests
+      }, { merge: true });
+      
+      setSaveMessage('¡Perfil guardado con éxito!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      console.error("Error al guardar:", error);
+      setPhotoError('Error al guardar en la nube. Puede que la foto sea muy grande.');
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -453,70 +464,20 @@ export default function App() {
           </div>
         </div>
       )}
-
-      <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 mt-2">
-        <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-sm transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>Editar Datos</button>
-        <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-sm transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>Vista Previa</button>
-      </div>
-
-      {profileMode === 'edit' ? (
-        <div className="space-y-6">
-          <div className="flex flex-col items-center">
-            <div onClick={() => fileInputRef.current.click()} className="w-40 h-40 rounded-full border-4 border-white shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer">
-              {myProfile.photo ? <img src={myProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
-            </div>
-            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-            
-            {photoError ? (
-              <div className="mt-3 p-2 bg-red-50 text-red-600 text-xs font-bold rounded-lg border border-red-100 flex items-start gap-1 max-w-[200px] text-center animate-in zoom-in">
-                <X className="w-4 h-4 shrink-0" /> {photoError}
-              </div>
-            ) : (
-              <p className="text-stone-400 text-xs mt-2 font-medium">Máx 800KB</p>
-            )}
-          </div>
-          <input type="text" placeholder="Nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 shadow-sm focus:outline-none focus:border-rose-400" />
-          <input type="text" placeholder="Frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 shadow-sm italic focus:outline-none focus:border-rose-400" />
-          <textarea placeholder="¿A quién buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 shadow-sm focus:outline-none focus:border-rose-400" rows="2" />
-          
-          <div className="flex flex-wrap gap-2">
-            {INTERESES_COMUNES.slice(0, 12).map(int => (
-              <button key={int} onClick={() => toggleInterest(int)} className={`px-3 py-2 rounded-full text-xs font-bold border transition-all ${myProfile.interests.includes(int) ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white text-stone-500'}`}>{int}</button>
-            ))}
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-stone-200">
-            <button onClick={() => setShowHelpModal(true)} className="flex items-center justify-center gap-2 w-full py-4 text-stone-500 font-bold bg-white rounded-2xl shadow-sm border border-stone-200 active:scale-95 transition-all hover:bg-stone-50 mb-4">
-              <Info className="w-5 h-5" /> Ayuda e Instrucciones
-            </button>
-            
-            <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full py-4 text-red-500 font-bold bg-red-50 rounded-2xl shadow-sm border border-red-100 active:scale-95 transition-all hover:bg-red-100">
-              <LogOut className="w-5 h-5" /> Cerrar Sesión
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex-1 min-h-[450px] relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200 group">
-          {myProfile.photo ? (
-            <img src={myProfile.photo} alt="Profile Preview" className="absolute inset-0 w-full h-full object-cover" />
-          ) : (
-            <div className="absolute inset-0 bg-stone-200 flex flex-col items-center justify-center text-stone-400">
-              <Camera className="w-12 h-12 mb-2" />
-              <p className="font-bold">Sube una foto</p>
-            </div>
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-          
-          <div className="absolute bottom-0 p-6 text-white w-full">
-            <h2 className="text-4xl font-black">{myProfile.name || 'Tu Nombre'}</h2>
-            <p className="text-rose-300 font-bold mb-4">"{myProfile.phrase || 'Tu frase estrella'}"</p>
-            <div className="flex flex-wrap gap-2">
-              {myProfile.interests.map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded-lg text-[10px] uppercase font-bold">{i}</span>)}
-            </div>
-          </div>
-        </div>
-      )}
-      <button onClick={saveProfileAndGo} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-bold text-xl shadow-lg active:scale-95 transition-all">¡A LA PISTA!</button>
+      <button 
+        onClick={handleGoToPista} 
+        disabled={isSavingProfile}
+        className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-bold text-xl shadow-lg active:scale-95 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        {isSavingProfile ? (
+          <>
+            <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            Guardando y entrando...
+          </>
+        ) : (
+          '¡A LA PISTA!'
+        )}
+      </button>
     </div>
   );
 
