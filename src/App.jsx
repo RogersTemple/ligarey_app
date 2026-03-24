@@ -3,7 +3,7 @@ import {
   Heart, X, MessageCircle, User, Flame, Music, 
   ChevronLeft, Send, Sparkles, Camera, Upload, 
   Trash2, Check, ZoomIn, Info, Crown, Hand, Beer, QrCode,
-  Mail, Lock, ArrowRight, KeyRound, LogOut
+  Mail, Lock, ArrowRight, KeyRound, LogOut, AlertCircle
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE FIREBASE ---
@@ -110,9 +110,8 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
-  // --- LÓGICA DE INICIO (CORREGIDA: Sin bucles infinitos) ---
+  // --- LÓGICA DE INICIO ---
   useEffect(() => {
-    // Temporizador para quitar la pantalla de carga si Google no responde
     const timer = setTimeout(() => setIsInitializing(false), 5000);
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -131,13 +130,12 @@ export default function App() {
               lookingFor: data.lookingFor || '',
               interests: data.interests || []
             });
-            // Solo cambiamos la vista si estamos en la pantalla inicial de bienvenida
-            if (data.name) {
-              setView(prev => prev === 'welcome' || prev === 'auth' ? 'discover' : prev);
+            if (data.name && (view === 'welcome' || view === 'auth')) {
+              setView('discover');
             }
           }
         } catch (error) {
-          console.error("Error al cargar datos:", error);
+          console.error("Error al cargar datos iniciales:", error);
         }
       } else {
         setCurrentUser(null);
@@ -150,7 +148,7 @@ export default function App() {
       unsubscribe();
       clearTimeout(timer);
     };
-  }, []); // [] significa que solo se ejecuta UNA vez al abrir la app
+  }, []);
 
   // --- FUNCIONES ---
   const handleAuthSubmit = async (e) => {
@@ -170,7 +168,7 @@ export default function App() {
         setView('register');
       }
     } catch (error) {
-      setAuthError('Datos incorrectos o error de red.');
+      setAuthError('Error de acceso. Verifica tu conexión.');
     } finally {
       setIsAuthLoading(false);
     }
@@ -178,9 +176,10 @@ export default function App() {
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
+    setPhotoError('');
     if (file) {
       if (file.size > 400 * 1024) {
-        setPhotoError('Máximo 400KB (haz una captura de pantalla).');
+        setPhotoError('Foto demasiado grande (Máx 400KB).');
         return;
       }
       const reader = new FileReader();
@@ -200,9 +199,13 @@ export default function App() {
     });
   };
 
-  // --- GUARDADO BLINDADO (Con tiempo límite) ---
+  // --- GUARDADO REFORZADO ---
   const saveProfileData = async () => {
-    if (!currentUser) return false;
+    if (!currentUser) {
+      setPhotoError('No se detectó usuario. Inicia sesión de nuevo.');
+      return false;
+    }
+    
     setIsSavingProfile(true);
     setPhotoError('');
     setSaveMessage('');
@@ -210,9 +213,9 @@ export default function App() {
     try {
       const userRef = doc(db, 'usuarios', currentUser.uid);
       
-      // Creamos una promesa que falla a los 10 segundos
+      // Creamos una promesa que falla a los 8 segundos
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 10000)
+        setTimeout(() => reject(new Error('timeout')), 8000)
       );
 
       // Carrera entre el guardado y el tiempo límite
@@ -227,14 +230,16 @@ export default function App() {
         timeoutPromise
       ]);
 
-      setSaveMessage('¡Guardado correctamente!');
+      setSaveMessage('¡Datos guardados con éxito!');
       setTimeout(() => setSaveMessage(''), 3000);
       return true;
     } catch (e) {
-      console.error(e);
-      setPhotoError(e.message === 'timeout' 
-        ? 'Google no responde. Comprueba tu internet.' 
-        : 'Error al guardar. La foto puede ser muy grande.');
+      console.error("Detalle del error Firebase:", e);
+      let msg = 'Error al conectar con Google.';
+      if (e.message === 'timeout') msg = 'Tiempo de espera agotado. ¿Tienes internet?';
+      if (e.code === 'permission-denied') msg = 'Error de permisos: Revisa las reglas de Firebase.';
+      
+      setPhotoError(msg);
       return false;
     } finally {
       setIsSavingProfile(false);
@@ -243,26 +248,28 @@ export default function App() {
 
   const handleGoToPista = async () => {
     if (!myProfile.name.trim()) {
-      setPhotoError('Pon tu nombre antes de entrar.');
+      setPhotoError('Escribe tu nombre antes de entrar.');
       return;
     }
     const success = await saveProfileData();
-    if (success) setView('discover');
+    if (success) {
+      setView('discover');
+    }
   };
 
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-stone-900 flex justify-center items-center">
-        <div className="flex flex-col items-center gap-4 animate-pulse">
+        <div className="flex flex-col items-center gap-4 animate-pulse text-white">
           <Crown className="w-16 h-16 text-rose-500" />
-          <p className="text-stone-400 font-bold tracking-widest text-xs uppercase">Cargando pase VIP...</p>
+          <p className="font-bold tracking-widest text-xs">CARGANDO...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center">
+    <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans">
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
         {/* Cabecera */}
@@ -280,7 +287,7 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative">
           
-          {/* BIENVENIDA */}
+          {/* VISTA: BIENVENIDA */}
           {view === 'welcome' && (
             <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 bg-stone-50">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
@@ -297,7 +304,7 @@ export default function App() {
             </div>
           )}
 
-          {/* AUTH */}
+          {/* VISTA: AUTH */}
           {view === 'auth' && (
             <div className="h-full flex flex-col p-6 bg-stone-50">
               <button onClick={() => setView('welcome')} className="self-start p-2 text-stone-400 mb-6"><ChevronLeft className="w-8 h-8" /></button>
@@ -315,12 +322,12 @@ export default function App() {
             </div>
           )}
 
-          {/* PERFIL (REVISADO) */}
+          {/* VISTA: PERFIL / REGISTRO */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-stone-900 text-center mb-6 uppercase tracking-tighter">Tu Perfil</h2>
               
-              <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1">
+              <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner">
                 <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>EDITAR</button>
                 <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-500'}`}>VISTA PREVIA</button>
               </div>
@@ -332,11 +339,11 @@ export default function App() {
                       {myProfile.photo ? <img src={myProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500' : 'text-stone-400'}`}>{photoError || 'Foto máx 400KB'}</p>
+                    <p className={`text-[10px] mt-2 font-bold ${photoError ? 'text-red-500 bg-red-50 px-2 py-1 rounded' : 'text-stone-400'}`}>{photoError || 'Foto máx 400KB'}</p>
                   </div>
-                  <input type="text" placeholder="Tu nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400" />
-                  <input type="text" placeholder="Tu frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 italic outline-none focus:border-rose-400" />
-                  <textarea placeholder="¿Qué buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 h-24 outline-none focus:border-rose-400" />
+                  <input type="text" placeholder="Tu nombre" value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
+                  <input type="text" placeholder="Tu frase estrella" value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 italic outline-none focus:border-rose-400 shadow-sm" />
+                  <textarea placeholder="¿Qué buscas?" value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 h-24 outline-none focus:border-rose-400 shadow-sm" />
                   
                   <div className="flex flex-wrap gap-2">
                     {INTERESES_COMUNES.slice(0, 15).map(int => (
@@ -345,10 +352,18 @@ export default function App() {
                   </div>
 
                   <div className="pt-6 space-y-4">
-                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs bg-green-50 py-2 rounded-lg border border-green-100">{saveMessage}</p>}
-                    <button onClick={saveProfileData} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
-                      {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR CAMBIOS'}
+                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs bg-green-50 py-2 rounded-lg border border-green-100 animate-pulse">{saveMessage}</p>}
+                    
+                    <button onClick={() => saveProfileData()} disabled={isSavingProfile} className="w-full h-14 bg-stone-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
+                      {isSavingProfile ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : 'GUARDAR DATOS'}
                     </button>
+
+                    {photoError && (
+                      <button onClick={() => setView('discover')} className="w-full py-2 text-stone-400 text-[10px] font-bold underline uppercase tracking-widest">
+                        Entrar sin guardar (Modo Invitado)
+                      </button>
+                    )}
+                    
                     <button onClick={() => signOut(auth)} className="w-full text-red-500 font-bold text-sm uppercase tracking-widest py-2">Cerrar Sesión</button>
                   </div>
                 </div>
@@ -357,7 +372,7 @@ export default function App() {
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-black">{myProfile.name || 'Tu Nombre'}</h2>
+                    <h2 className="text-3xl font-black tracking-tight">{myProfile.name || 'Tu Nombre'}</h2>
                     <p className="text-rose-300 font-bold mb-3 italic">"{myProfile.phrase || 'Frase estrella'}"</p>
                     <div className="flex flex-wrap gap-2">{myProfile.interests.map(i => <span key={i} className="px-2 py-1 bg-white/20 backdrop-blur-md rounded text-[9px] uppercase font-bold">{i}</span>)}</div>
                   </div>
@@ -369,7 +384,7 @@ export default function App() {
             </div>
           )}
 
-          {/* DISCOVER (Pista) */}
+          {/* VISTA: DISCOVER (Pista) */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative">
               <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border border-stone-200">
@@ -390,35 +405,36 @@ export default function App() {
           )}
         </div>
 
-        {/* Navegación Inferior */}
+        {/* Barra Inferior */}
         {['discover', 'register'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-400'}`}><Flame className="w-7 h-7" /></button>
-            <button className="p-2 text-stone-300 cursor-not-allowed"><MessageCircle className="w-7 h-7" /></button>
+            <button className="p-2 text-stone-200 cursor-not-allowed"><MessageCircle className="w-7 h-7" /></button>
             <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-rose-500 scale-110' : 'text-stone-400'}`}><User className="w-7 h-7" /></button>
           </div>
         )}
 
-        {/* Modal QR */}
+        {/* Modal Recorte */}
         {isCropping && (
           <div className="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md">
             <img src={tempPhoto} alt="Crop" className="w-64 h-64 rounded-full object-cover mb-8 border-4 border-rose-500 shadow-2xl" />
             <div className="flex gap-4 w-full max-w-xs">
-              <button onClick={() => setIsCropping(false)} className="flex-1 py-4 bg-white/10 text-white rounded-2xl">Cancelar</button>
+              <button onClick={() => setIsCropping(false)} className="flex-1 py-4 bg-white/10 text-white rounded-2xl font-bold">Cancelar</button>
               <button onClick={confirmCrop} className="flex-1 py-4 bg-rose-500 text-white rounded-2xl font-bold">Aceptar</button>
             </div>
           </div>
         )}
 
+        {/* Modal QR */}
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center relative shadow-2xl">
               <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase">Tu Descuento Rey</h3>
+              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase">Descuento Rey</h3>
               <div className="bg-stone-100 p-4 rounded-3xl inline-block mb-4 shadow-inner border border-stone-200">
                 <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${currentUser?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply" />
               </div>
-              <p className="text-xs text-stone-500 uppercase font-bold tracking-widest">En barra principal</p>
+              <p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest">En barra principal</p>
             </div>
           </div>
         )}
