@@ -106,48 +106,61 @@ export default function App() {
     }
   }, [messages, view, activeChatId]);
 
-  // --- NUEVO: AUTO-LOGIN Y CARGA DE DATOS AL REFRESCAR ---
+  // --- NUEVO: AUTO-LOGIN Y CARGA DE DATOS (VERSIÓN ANTI-BLOQUEOS) ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    // ⏱️ SISTEMA DE EMERGENCIA: Si Firebase tarda más de 5 segundos, rompemos la pantalla de carga
+    const emergencyTimer = setTimeout(() => {
+      console.warn("La conexión tardó demasiado. Forzando entrada...");
+      setIsInitializing(false);
+    }, 5000);
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       if (user) {
-        try {
-          // 1. Si estás logueado, descargamos tus datos de la bóveda
-          const docRef = doc(db, 'usuarios', user.uid);
-          const docSnap = await getDoc(docRef);
-          
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            // 2. Metemos tus datos en la app
-            setMyProfile({
-              name: data.name || '',
-              photo: data.photo || null,
-              phrase: data.phrase || '',
-              lookingFor: data.lookingFor || '',
-              interests: data.interests || []
-            });
+        // Pedimos los datos a la base de datos (usando Promesas para que no se atasque)
+        getDoc(doc(db, 'usuarios', user.uid))
+          .then((docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              setMyProfile({
+                name: data.name || '',
+                photo: data.photo || null,
+                phrase: data.phrase || '',
+                lookingFor: data.lookingFor || '',
+                interests: data.interests || []
+              });
 
-            // 3. AUTO-LOGIN: Si tienes nombre, vamos directo a la pista. Si no, a tu perfil.
-            if (data.name) {
-              setView('discover');
+              // Si ya tiene nombre, va a la pista. Si no, a terminar el perfil.
+              if (data.name) {
+                setView('discover');
+              } else {
+                setView('register');
+              }
             } else {
-              setView('register');
+               setView('register');
             }
-          } else {
-             // Si acabas de registrarte y aún no hay doc, vas a crear el perfil
-             setView('register');
-          }
-        } catch (error) {
-          console.error("Error cargando perfil", error);
-        }
+          })
+          .catch((error) => {
+            console.error("Error cargando perfil", error);
+            setView('register'); // Si falla la red, te dejamos en tu perfil
+          })
+          .finally(() => {
+            // Cuando termine (bien o mal), apagamos el cronómetro y la pantalla de carga
+            clearTimeout(emergencyTimer);
+            setIsInitializing(false); 
+          });
       } else {
-        // Si de verdad NO estás logueado, vamos a la bienvenida
+        // Si no hay usuario logueado
         setView('welcome');
+        clearTimeout(emergencyTimer);
+        setIsInitializing(false);
       }
-      // Terminamos de comprobar, apagamos la pantalla de carga
-      setIsInitializing(false); 
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      clearTimeout(emergencyTimer);
+    };
   }, []);
 
   // --- REGISTRO Y AUTH LOGIC ---
