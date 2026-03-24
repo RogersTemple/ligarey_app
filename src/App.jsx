@@ -31,8 +31,8 @@ import {
   query
 } from 'firebase/firestore';
 
-// Inicialización segura con variables de entorno
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+// FIJAMOS LA CONFIGURACIÓN PARA QUE SIEMPRE USE TU FIREBASE REAL
+const firebaseConfig = {
   apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
   authDomain: "ligarey.firebaseapp.com",
   projectId: "ligarey",
@@ -44,7 +44,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'ligarey-v3';
+const appId = 'ligarey-oficial-app'; // Un ID fijo para todos los entornos
 
 // --- CONSTANTES ---
 const INTERESES_COMUNES = [
@@ -62,16 +62,15 @@ const PERFILES_MOCK = [
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
 
 export default function App() {
-  // Estados de la App
   const [view, setView] = useState('welcome');
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
+  const [dbError, setDbError] = useState(''); // CHIVATO DE ERRORES FIREBASE
   const [user, setUser] = useState(null); 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Perfil del usuario
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], notificationsEnabled: true 
   });
@@ -80,7 +79,6 @@ export default function App() {
   const [saveMessage, setSaveMessage] = useState(''); 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Estados de Discover y Mensajería
   const [profiles, setProfiles] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showMatchAnimation, setShowMatchAnimation] = useState(null);
@@ -98,38 +96,21 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState('');
 
-  // Refs de la App blindadas (soluciona el ReferenceError)
   const sessionStart = useRef(new Date().toISOString());
   const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null); 
 
-  // Rutas de Firestore
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
 
-  // Auto-scroll en el chat
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, view]);
 
   // --- ARRANQUE Y AUTENTICACIÓN ---
   useEffect(() => {
-    const initApp = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        }
-      } catch (e) { 
-        console.error("Auth error silent fail"); 
-      }
-    };
-
-    initApp();
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -138,8 +119,6 @@ export default function App() {
           if (userDoc.exists()) {
             const data = userDoc.data();
             setMyProfile(prev => ({ ...prev, ...data }));
-            
-            // Bloqueo si el perfil es nuevo o incompleto
             if (!data.name || !data.photo || !data.phrase || !data.lookingFor) {
               setView('register');
             } else if (view === 'welcome' || view === 'auth') {
@@ -179,7 +158,7 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Snapshot error avoided"));
+    }, (err) => console.error("Error matches:", err));
 
     const unsubChats = onSnapshot(chatsCol, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -197,14 +176,15 @@ export default function App() {
           }
         }
       });
-    }, (err) => console.error("Snapshot error avoided"));
+    }, (err) => console.error("Error chats:", err));
 
     return () => { unsubMatches(); unsubChats(); };
   }, [user, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR DATOS (Pista y Chats) ---
+  // --- CARGAR DATOS ---
   const fetchData = async () => {
     if (!user) return;
+    setDbError(''); // Limpiamos el error previo al recargar
     
     let uniqueIds = [];
     try {
@@ -223,7 +203,8 @@ export default function App() {
       }));
       setActiveChats(enriched);
     } catch (e) {
-      console.error("Error cargando chats/matches. Revisa las reglas de Firebase:", e);
+      console.error("Error matches:", e);
+      setDbError("Permisos denegados al cargar Chats. Revisa Firebase Rules.");
     }
 
     if (view === 'discover') {
@@ -231,17 +212,21 @@ export default function App() {
         const usersSnap = await getDocs(usersCol);
         const matchedSet = new Set(uniqueIds.map(c => c.id));
         const list = [];
+        
         usersSnap.forEach(d => { 
-          // Cargamos a todos los usuarios reales registrados
           if (d.id !== user.uid && d.data().name) {
             list.push({ id: d.id, ...d.data(), isAlreadyMatched: matchedSet.has(d.id) }); 
           }
         });
         
-        setProfiles(list.length > 0 ? list : PERFILES_MOCK);
+        // Mezclamos perfiles reales con los de mock
+        const mockNoMatch = PERFILES_MOCK.filter(m => !matchedSet.has(m.id));
+        setProfiles([...list, ...mockNoMatch]);
+        
       } catch (e) {
-        console.error("Error cargando usuarios. Revisa las reglas de Firebase:", e);
-        setProfiles(PERFILES_MOCK); // Muestra los ejemplos si hay error de permisos
+        console.error("Error usuarios:", e);
+        setDbError("Permisos denegados en Firebase. Solo verás ejemplos.");
+        setProfiles(PERFILES_MOCK);
       }
     }
   };
@@ -269,7 +254,7 @@ export default function App() {
     return () => unsubChat();
   }, [user, activeChatUser]);
 
-  // --- FUNCIONES DE AUTH Y PERFIL ---
+  // --- FUNCIONES ---
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -306,8 +291,7 @@ export default function App() {
       setTimeout(() => setSaveMessage(''), 2000);
       return true;
     } catch (e) { 
-      console.error("Error guardando perfil:", e);
-      setPhotoError('Error al guardar. Si estás en Vercel, revisa las reglas de Firebase.'); 
+      setPhotoError('Error en permisos Firebase al guardar.'); 
       return false; 
     }
     finally { setIsSavingProfile(false); }
@@ -371,13 +355,11 @@ export default function App() {
     }, type === 'dislike' ? 300 : 1500);
   };
 
-  // --- CARGANDO ---
-  if (isInitializing) return <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /><p className="text-stone-400 font-black text-[10px] tracking-[0.2em]">CARGANDO LIGAREY...</p></div>;
+  if (isInitializing) return <div className="min-h-screen bg-stone-900 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /><p className="text-stone-400 font-black text-[10px] tracking-[0.2em] animate-pulse">CARGANDO...</p></div>;
 
   return (
     <div className="min-h-screen bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
       
-      {/* TOAST FLOTANTE */}
       {newNotificationToast && (
         <div onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] w-full max-w-[340px] px-4 animate-in slide-in-from-top cursor-pointer">
           <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
@@ -389,7 +371,6 @@ export default function App() {
         </div>
       )}
 
-      {/* INSPECTOR VIP */}
       {showInspector && (
         <div className="absolute inset-0 z-[500] bg-stone-900/95 backdrop-blur-xl animate-in slide-in-from-bottom flex flex-col p-6">
           <button onClick={() => setShowInspector(null)} className="self-end p-2 bg-white/10 rounded-full text-white mb-6"><X className="w-6 h-6" /></button>
@@ -399,7 +380,7 @@ export default function App() {
             <div className="absolute bottom-0 p-8 text-white w-full">
               <h2 className="text-4xl font-black tracking-tighter mb-2 leading-none">{showInspector.name}</h2>
               <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
-              <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">Busco:</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
+              <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">Estoy buscando:</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
               <div className="flex flex-wrap gap-2">{(showInspector.interests || []).map((i, idx) => <span key={idx} className="px-3 py-1 bg-white/20 rounded-full text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
             </div>
           </div>
@@ -409,12 +390,11 @@ export default function App() {
 
       <div className="w-full max-w-md bg-white h-screen sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* CABECERA GENERAL */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
             <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
             <div className="flex items-center gap-2">
-              <button onClick={fetchData} className="p-2 text-stone-400 hover:text-rose-500 transition-colors"><RefreshCcw className="w-4 h-4" /></button>
+              <button onClick={fetchData} className="p-2 text-stone-400 hover:text-rose-500 transition-colors active:rotate-180"><RefreshCcw className="w-4 h-4" /></button>
               <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> DESCUENTO REY</button>
             </div>
           </div>
@@ -422,11 +402,10 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative">
           
-          {/* WELCOME */}
           {view === 'welcome' && (
             <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in">
               <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
-              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey <span className="text-[10px] text-rose-500 font-bold ml-1">v3</span></h1>
+              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
               <div className="w-full max-w-xs space-y-4 pt-4">
                 <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">Crear cuenta</button>
                 <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all">Ya tengo cuenta</button>
@@ -434,7 +413,6 @@ export default function App() {
             </div>
           )}
 
-          {/* AUTH */}
           {view === 'auth' && (
             <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right">
               <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
@@ -451,7 +429,6 @@ export default function App() {
             </div>
           )}
 
-          {/* PERFIL */}
           {view === 'register' && (
             <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
               <h2 className="text-2xl font-black text-center mb-2 uppercase tracking-tighter">Mi Perfil VIP</h2>
@@ -488,7 +465,6 @@ export default function App() {
                     {saveMessage && <p className="text-green-600 text-center font-bold text-xs">{saveMessage}</p>}
                     <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">Guardar Cambios</button>
                     <button onClick={handleLogout} className="w-full text-stone-400 font-black text-[10px] uppercase py-2 active:opacity-50">Cerrar Sesión</button>
-                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-red-500 font-black text-[10px] uppercase py-2 active:opacity-50">Borrar Cuenta</button>
                   </div>
                 </div>
               ) : (
@@ -502,7 +478,6 @@ export default function App() {
             </div>
           )}
 
-          {/* DISCOVER (LA PISTA) */}
           {view === 'discover' && (
             <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in fade-in">
               {showMatchAnimation && (
@@ -513,11 +488,24 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* CHIVATO DE ERRORES FIREBASE */}
+              {dbError && (
+                <div className="absolute top-4 left-4 right-4 z-[100] bg-red-500 text-white p-3 rounded-2xl shadow-xl flex items-center gap-2 text-[10px] font-bold uppercase animate-in slide-in-from-top">
+                  <AlertCircle className="w-5 h-5 shrink-0" />
+                  <p>{dbError}</p>
+                </div>
+              )}
+
               <div className={`flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 transition-all duration-500 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-emerald-500 shadow-emerald-500/20' : 'border-stone-200'}`}>
                 {profiles[currentIndex] ? (
                   <>
                     <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
-                    {profiles[currentIndex]?.isAlreadyMatched && <div className="absolute top-6 right-6 z-10 bg-emerald-500 text-white px-4 py-1.5 rounded-full font-black text-[10px] uppercase shadow-xl flex items-center gap-2"><Check className="w-3 h-3" /> YA EN CHAT</div>}
+                    {profiles[currentIndex]?.isAlreadyMatched && (
+                      <div className="absolute top-6 right-6 z-10 bg-emerald-500 text-white px-4 py-1.5 rounded-full font-black text-[10px] uppercase shadow-xl flex items-center gap-2">
+                        <Check className="w-3 h-3" /> YA EN CHAT
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                     <div className="absolute bottom-0 p-8 text-white w-full">
                       <div className="flex items-center gap-2 mb-1"><h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>{profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-emerald-400" />}</div>
@@ -529,7 +517,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-stone-400 p-8 text-center gap-4 opacity-40">
                     <Sparkles className="w-12 h-12" />
-                    <p className="font-bold italic">Buscando gente nueva...</p>
+                    <p className="font-bold italic">Nadie nuevo por la pista...</p>
                     <button onClick={fetchData} className="text-rose-500 uppercase font-black text-xs border-b-2 border-rose-500 pb-1">Refrescar radar</button>
                   </div>
                 )}
@@ -542,7 +530,7 @@ export default function App() {
             </div>
           )}
 
-          {/* MENSAJES / CHATS */}
+          {/* MENSAJES */}
           {view === 'messages' && (
             <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
               <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter">Mis Chats</h2>
@@ -558,7 +546,7 @@ export default function App() {
             </div>
           )}
 
-          {/* CHAT PRIVADO */}
+          {/* CHAT ACTIVO */}
           {view === 'chat' && activeChatUser && (
             <div className="h-full flex flex-col bg-stone-50 animate-in slide-in-from-right duration-300">
               <div className="p-4 bg-white border-b flex items-center justify-between z-10 shadow-sm">
@@ -607,7 +595,7 @@ export default function App() {
           )}
         </div>
 
-        {/* BARRA INFERIOR */}
+        {/* BOTTOM NAV */}
         {['discover', 'register', 'messages', 'notifications'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
             <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
