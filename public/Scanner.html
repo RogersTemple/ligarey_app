@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LigaRey | Escáner de Barra</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Librería para escanear QR mediante la cámara -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        /* Estilos para limpiar el UI de la librería del escáner */
+        #reader { border: none !important; border-radius: 1.5rem; overflow: hidden; background: #000; }
+        #reader video { object-fit: cover; }
+        #reader__dashboard_section_csr span { color: #f43f5e; font-weight: bold; }
+        #reader__dashboard_section_swaplink { color: white; text-decoration: underline; margin-top: 10px; display: inline-block;}
+    </style>
+</head>
+<body class="bg-slate-950 text-white min-h-[100dvh] flex flex-col font-sans">
+
+    <!-- Cabecera -->
+    <div class="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-center gap-2 z-10 shrink-0 shadow-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-fuchsia-500"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14"/></svg>
+        <h1 class="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 to-violet-500 tracking-tighter uppercase leading-none">Escáner VIP</h1>
+    </div>
+
+    <!-- Visor de la cámara -->
+    <div class="flex-1 flex flex-col items-center justify-center p-6 relative">
+        <div class="w-full max-w-md relative">
+            <div id="reader" class="w-full shadow-2xl shadow-fuchsia-500/20"></div>
+            <!-- Marco visual superpuesto -->
+            <div class="absolute inset-0 pointer-events-none border-4 border-fuchsia-500/50 rounded-[1.5rem] z-10"></div>
+        </div>
+        <p id="status-text" class="mt-6 text-slate-400 text-sm font-bold uppercase tracking-widest text-center animate-pulse">Apuntando al QR del cliente...</p>
+    </div>
+
+    <!-- Modal de Carga (Mensaje Box) -->
+    <div id="loading-modal" class="hidden absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
+        <div class="bg-slate-900 rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl border border-slate-800 flex flex-col items-center">
+            <div class="w-12 h-12 border-4 border-fuchsia-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <h3 class="text-xl font-black text-white uppercase tracking-widest">Verificando...</h3>
+        </div>
+    </div>
+
+    <!-- Modal Ficha de Usuario -->
+    <div id="user-modal" class="hidden absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
+        <div class="bg-fuchsia-500 rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl border-4 border-fuchsia-400">
+            <div class="bg-emerald-500 text-white font-black text-xs uppercase px-4 py-1.5 rounded-full absolute -top-4 left-1/2 -translate-x-1/2 shadow-lg flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                VERIFICADO
+            </div>
+            
+            <div class="flex flex-col items-center mt-4 mb-4 relative">
+                <img id="user-photo" src="" alt="VIP" class="w-32 h-32 object-cover rounded-full border-[6px] border-white shadow-xl bg-slate-200" />
+            </div>
+            
+            <h2 id="user-name" class="text-3xl font-black text-white mb-2 uppercase tracking-tighter leading-none">Nombre</h2>
+            
+            <div class="flex items-center justify-center gap-3 mb-4 text-[10px] uppercase font-black tracking-widest text-fuchsia-200">
+                <span id="user-country">País</span>
+                <span class="opacity-40">•</span>
+                <span id="user-lang">Idioma</span>
+            </div>
+
+            <div class="bg-white p-4 rounded-2xl shadow-inner mb-6">
+                <p class="text-slate-800 font-black text-lg uppercase tracking-tight">Aplicar Descuento</p>
+                <p class="text-fuchsia-500 font-bold text-xs uppercase">- 1€ en la bebida -</p>
+            </div>
+
+            <button onclick="resumeScanning()" class="w-full py-4 rounded-full bg-slate-900 text-white font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl">
+                Cerrar y Siguiente
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal Error -->
+    <div id="error-modal" class="hidden absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
+        <div class="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl">
+            <div class="mx-auto w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <h3 id="error-title" class="text-2xl font-black text-slate-800 mb-2 uppercase leading-none">Error</h3>
+            <p id="error-msg" class="text-slate-500 mb-8 text-sm font-bold">QR Inválido</p>
+            <button onclick="resumeScanning()" class="w-full py-4 rounded-full bg-red-500 text-white font-black text-lg active:scale-95 transition-all">INTENTAR DE NUEVO</button>
+        </div>
+    </div>
+
+    <!-- Lógica de Firebase y Escáner -->
+    <script type="module">
+        // Importar Firebase (mismas credenciales que la App principal)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
+            authDomain: "ligarey.firebaseapp.com",
+            projectId: "ligarey",
+            storageBucket: "ligarey.firebasestorage.app",
+            messagingSenderId: "625102595981",
+            appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const ligareyAppId = 'ligarey-v4';
+
+        let html5QrCode;
+        let isScanningAllowed = false;
+
+        // Elementos UI
+        const loadingModal = document.getElementById('loading-modal');
+        const userModal = document.getElementById('user-modal');
+        const errorModal = document.getElementById('error-modal');
+        const statusText = document.getElementById('status-text');
+
+        // Inicializar
+        async function initScanner() {
+            try {
+                // Autenticación anónima necesaria para leer la base de datos
+                await signInAnonymously(auth);
+                
+                // Configurar cámara
+                html5QrCode = new Html5Qrcode("reader");
+                const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+                
+                html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
+                    .then(() => { isScanningAllowed = true; })
+                    .catch((err) => { showError("Error de Cámara", "Permite el uso de la cámara en tu navegador."); });
+
+            } catch (error) {
+                showError("Error de Conexión", "No se pudo conectar al servidor.");
+            }
+        }
+
+        // Función que salta cuando lee un QR
+        async function onScanSuccess(decodedText) {
+            if (!isScanningAllowed) return;
+            isScanningAllowed = false; // Pausar escaneo
+            
+            if (decodedText.startsWith("LIGAREY-")) {
+                const uid = decodedText.replace("LIGAREY-", "");
+                await fetchAndShowUser(uid);
+            } else {
+                showError("QR No Reconocido", "Este código no pertenece a la app LigaRey.");
+            }
+        }
+
+        function onScanFailure(error) {
+            // Se ignora, se dispara cada frame que no ve un QR
+        }
+
+        // Buscar usuario en base de datos
+        async function fetchAndShowUser(uid) {
+            loadingModal.classList.remove('hidden');
+            try {
+                const userRef = doc(db, 'artifacts', ligareyAppId, 'public', 'data', 'usuarios', uid);
+                const userSnap = await getDoc(userRef);
+                
+                loadingModal.classList.add('hidden');
+
+                if (userSnap.exists()) {
+                    const userData = userSnap.data();
+                    
+                    // Rellenar ficha
+                    document.getElementById('user-photo').src = userData.photo || "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
+                    document.getElementById('user-name').innerText = userData.name || "Desconocido";
+                    document.getElementById('user-country').innerText = userData.pais || "Nación";
+                    
+                    const idiomas = userData.idiomas ? userData.idiomas.join(', ') : (userData.idioma || "Idioma");
+                    document.getElementById('user-lang').innerText = idiomas;
+
+                    userModal.classList.remove('hidden');
+                    statusText.innerText = "Usuario Verificado";
+                } else {
+                    showError("Usuario No Encontrado", "El perfil no existe o fue eliminado.");
+                }
+            } catch (error) {
+                loadingModal.classList.add('hidden');
+                showError("Error de Red", "Fallo al consultar la base de datos.");
+            }
+        }
+
+        // Mostrar Modal de Error
+        function showError(title, msg) {
+            loadingModal.classList.add('hidden');
+            document.getElementById('error-title').innerText = title;
+            document.getElementById('error-msg').innerText = msg;
+            errorModal.classList.remove('hidden');
+            statusText.innerText = "Error en lectura";
+        }
+
+        // Exponer función para los botones de "Siguiente" o "Reintentar"
+        window.resumeScanning = function() {
+            userModal.classList.add('hidden');
+            errorModal.classList.add('hidden');
+            
+            // Pequeño retardo para no escanear el mismo QR al instante
+            setTimeout(() => {
+                isScanningAllowed = true;
+                statusText.innerText = "Apuntando al QR del cliente...";
+            }, 1000);
+        }
+
+        // Arrancar
+        initScanner();
+    </script>
+</body>
+</html>
