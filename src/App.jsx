@@ -164,7 +164,6 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Perfil y Ajustes (Añadido appLanguage)
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], 
     pais: '', idiomas: [], appLanguage: 'es', 
@@ -196,31 +195,35 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [otherIsTyping, setOtherIsTyping] = useState(false);
 
-  // Refs de control
   const sessionStart = useRef(new Date().toISOString());
   const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null); 
   const typingTimeoutRef = useRef(null);
 
-  // Rutas de Firestore
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
   const typingCol = collection(db, 'artifacts', appId, 'public', 'data', 'typing');
 
-  // Traducción Dinámica
   const lang = myProfile?.appLanguage || 'es';
   const t = (key) => T[lang]?.[key] || T['es'][key] || key;
 
-  // Auto-scroll en el chat
   useEffect(() => {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [chatMessages, view, otherIsTyping]);
 
-  // --- ARRANQUE Y AUTENTICACIÓN ---
+  const showNativeNotification = (title, body) => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      try {
+        new Notification(title, { body: body, icon: DEFAULT_AVATAR });
+      } catch (e) { console.error("Error mostrando notificación nativa", e); }
+    }
+  };
+
   useEffect(() => {
     const initApp = async () => {
       try {
@@ -241,7 +244,6 @@ export default function App() {
             const loadedIdiomas = data.idiomas || (data.idioma ? [data.idioma] : []);
             setMyProfile(prev => ({ ...prev, ...data, idiomas: loadedIdiomas }));
             
-            // Bloqueo si el perfil es incompleto
             if (!data.name || !data.photo || !data.phrase || !data.lookingFor || !data.pais || loadedIdiomas.length === 0) {
               setView('register');
             } else if (view === 'welcome' || view === 'auth') {
@@ -259,7 +261,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- LISTENERS EN TIEMPO REAL ---
   useEffect(() => {
     if (!user) return;
     const unsubMatches = onSnapshot(matchesCol, (snapshot) => {
@@ -304,7 +305,6 @@ export default function App() {
     return () => { unsubMatches(); unsubChats(); };
   }, [user, activeChatUser, myProfile.notificationsEnabled, view]);
 
-  // --- CARGAR DATOS ---
   const fetchData = async () => {
     if (!user) return;
     try {
@@ -334,8 +334,6 @@ export default function App() {
             list.push({ id: d.id, ...uData, idiomas: uIdiomas, isAlreadyMatched: matchedSet.has(d.id) }); 
           }
         });
-        
-        // Añadimos mocks solo si está muy vacío para no asustar
         setProfiles(list.length > 0 ? list : []);
       }
     } catch (e) { console.error("Fetch error avoided"); }
@@ -345,7 +343,6 @@ export default function App() {
     if (user && (view === 'discover' || view === 'messages')) { fetchData(); }
   }, [user, view]);
 
-  // --- CHAT ACTIVO ---
   useEffect(() => {
     if (!user || !activeChatUser) return;
     const unsubChat = onSnapshot(chatsCol, (snapshot) => {
@@ -362,7 +359,6 @@ export default function App() {
     return () => unsubChat();
   }, [user, activeChatUser]);
 
-  // --- ESCUCHAR SI EL OTRO ESCRIBE ---
   useEffect(() => {
     if (!user || !activeChatUser) {
       setOtherIsTyping(false);
@@ -378,15 +374,10 @@ export default function App() {
     return () => unsubTyping();
   }, [user, activeChatUser]);
 
-  // --- FUNCIONES DE AUTH Y PERFIL ---
   const handleTypingChange = (e) => {
     setNewMessageText(e.target.value);
     if (!user || !activeChatUser) return;
-
-    // Escribir en Firestore que estamos tecleando
     setDoc(doc(typingCol, user.uid), { typingTo: activeChatUser.id, timestamp: new Date().toISOString() });
-
-    // Limpiar el estado de tecleando después de 2 segundos de inactividad
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       setDoc(doc(typingCol, user.uid), { typingTo: null }, { merge: true });
@@ -396,14 +387,12 @@ export default function App() {
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
-    
     if (authMode === 'register') {
       if (!registerTerms.privacy || !registerTerms.conduct) {
         setAuthError(t('err_terms'));
         return;
       }
     }
-
     setIsAuthLoading(true);
     try {
       if (authMode === 'login') {
@@ -413,7 +402,7 @@ export default function App() {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', res.user.uid), { 
           email: authForm.email, fechaRegistro: new Date().toISOString(), 
           notificationsEnabled: true, newsletterAccepted: registerTerms.newsletter,
-          appLanguage: myProfile.appLanguage // Guardamos su idioma elegido
+          appLanguage: myProfile.appLanguage
         });
         setView('register');
       }
@@ -453,8 +442,6 @@ export default function App() {
 
   const saveProfileData = async () => {
     if (!user) return false;
-    
-    // Validación de campos
     if (!myProfile.name?.trim()) { setPhotoError(t('err_name')); return false; }
     if (!myProfile.photo) { setPhotoError(t('err_photo')); return false; }
     if (!myProfile.pais?.trim()) { setPhotoError(t('err_nation')); return false; }
@@ -528,8 +515,6 @@ export default function App() {
     if (user) {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid), { notificationsEnabled: newVal }, { merge: true });
     }
-    
-    // Pedir permiso al navegador/móvil si se activan
     if (newVal && 'Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
       Notification.requestPermission();
     }
@@ -558,81 +543,75 @@ export default function App() {
     }, type === 'dislike' ? 300 : 1500);
   };
 
-  if (isInitializing) return <div className="min-h-[100dvh] bg-stone-900 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-rose-500 animate-pulse" /><p className="text-stone-400 font-black text-[10px] tracking-[0.2em] animate-pulse">{t('loading')}</p></div>;
+  if (isInitializing) return <div className="min-h-[100dvh] bg-slate-950 flex flex-col items-center justify-center gap-4"><Crown className="w-16 h-16 text-fuchsia-500 animate-pulse" /><p className="text-slate-400 font-black text-[10px] tracking-[0.2em] animate-pulse">{t('loading')}</p></div>;
 
   return (
-    <div className="min-h-[100dvh] bg-stone-900 sm:bg-stone-200 flex justify-center items-center font-sans overflow-hidden">
+    <div className="min-h-[100dvh] bg-slate-950 sm:bg-slate-900 flex justify-center items-center font-sans overflow-hidden">
       
-      {/* TOAST FLOTANTE */}
       {newNotificationToast && (
         <div onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] w-full max-w-[340px] px-4 animate-in slide-in-from-top cursor-pointer">
-          <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${newNotificationToast.isMessage ? 'bg-rose-500' : 'bg-amber-500'}`}>
-              {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5" />}
+          <div className="bg-slate-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${newNotificationToast.isMessage ? 'bg-fuchsia-500' : 'bg-amber-400'}`}>
+              {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-slate-900" />}
             </div>
-            <div className="flex-1"><p className="text-[9px] font-black uppercase text-rose-400">{t('toast_vip')}</p><p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? t('wrote_you') : t('greeted_you')}</p></div>
+            <div className="flex-1"><p className="text-[9px] font-black uppercase text-fuchsia-400">{t('toast_vip')}</p><p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? t('wrote_you') : t('greeted_you')}</p></div>
           </div>
         </div>
       )}
 
-      {/* INSPECTOR VIP */}
       {showInspector && (
-        <div className="absolute inset-0 z-[500] bg-stone-900/95 backdrop-blur-xl animate-in slide-in-from-bottom flex flex-col p-6">
+        <div className="absolute inset-0 z-[500] bg-slate-950/95 backdrop-blur-xl animate-in slide-in-from-bottom flex flex-col p-6">
           <button onClick={() => setShowInspector(null)} className="self-end p-2 bg-white/10 rounded-full text-white mb-6"><X className="w-6 h-6" /></button>
           <div className="flex-1 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white">
             <img src={showInspector.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent"></div>
             <div className="absolute bottom-0 p-8 text-white w-full">
               <h2 className="text-4xl font-black tracking-tighter mb-2 leading-none">{showInspector.name}</h2>
-          <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
-            <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {showInspector.pais || t('unknown')}</div>
-            <span className="opacity-40">•</span>
-            <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {showInspector.idiomas?.join(', ') || t('unknown')}</div>
-          </div>
-          <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
+              <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-fuchsia-300">
+                <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {showInspector.pais || t('unknown')}</div>
+                <span className="opacity-40">•</span>
+                <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {showInspector.idiomas?.join(', ') || t('unknown')}</div>
+              </div>
+              <p className="text-fuchsia-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
               <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">{t('looking_for')}</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
               <div className="flex flex-wrap gap-2">{(showInspector.interests || []).map((i, idx) => <span key={idx} className="px-3 py-1 bg-white/20 rounded-full text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
             </div>
           </div>
-          <button onClick={() => setShowInspector(null)} className="w-full py-5 mt-6 rounded-full bg-rose-500 text-white font-black uppercase tracking-widest">{t('close_tab')}</button>
+          <button onClick={() => setShowInspector(null)} className="w-full py-5 mt-6 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white font-black uppercase tracking-widest">{t('close_tab')}</button>
         </div>
       )}
 
-      {/* MODAL AJUSTES Y SEGURIDAD */}
       {showSettings && (
-        <div className="absolute inset-0 z-[500] bg-black/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
+        <div className="absolute inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
           <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full relative shadow-2xl animate-in zoom-in">
-            <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-800 transition-colors"><X className="w-6 h-6" /></button>
-            <h3 className="text-2xl font-black text-stone-800 mb-6 tracking-tighter uppercase font-black">{t('settings')}</h3>
+            <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 transition-colors"><X className="w-6 h-6" /></button>
+            <h3 className="text-2xl font-black text-slate-800 mb-6 tracking-tighter uppercase font-black">{t('settings')}</h3>
             
             <div className="space-y-4">
-              {/* Idioma Interfaz */}
-              <div className="flex items-center justify-between bg-stone-50 p-4 rounded-2xl border border-stone-100">
+              <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div className="flex items-center gap-2">
-                  <Globe className="w-5 h-5 text-stone-400" />
-                  <p className="font-bold text-stone-800 leading-none">{t('app_language')}</p>
+                  <Globe className="w-5 h-5 text-slate-400" />
+                  <p className="font-bold text-slate-800 leading-none">{t('app_language')}</p>
                 </div>
-                <select value={myProfile.appLanguage} onChange={(e) => changeAppLanguage(e.target.value)} className="bg-white border border-stone-200 text-stone-700 text-xs font-bold rounded-lg p-2 outline-none">
+                <select value={myProfile.appLanguage} onChange={(e) => changeAppLanguage(e.target.value)} className="bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-lg p-2 outline-none">
                   <option value="es">Español</option>
                   <option value="en">English</option>
                   <option value="it">Italiano</option>
                 </select>
               </div>
 
-              {/* Notificaciones */}
-              <div className="flex items-center justify-between bg-stone-50 p-4 rounded-2xl border border-stone-100">
+              <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
-                  <p className="font-bold text-stone-800 leading-none mb-1">{t('notifications')}</p>
-                  <p className="text-[10px] text-stone-500 uppercase tracking-widest">{t('notif_desc')}</p>
+                  <p className="font-bold text-slate-800 leading-none mb-1">{t('notifications')}</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest">{t('notif_desc')}</p>
                 </div>
-                <button onClick={toggleNotifications} className={`w-12 h-6 rounded-full transition-colors relative ${myProfile.notificationsEnabled ? 'bg-rose-500' : 'bg-stone-300'}`}>
+                <button onClick={toggleNotifications} className={`w-12 h-6 rounded-full transition-colors relative ${myProfile.notificationsEnabled ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500' : 'bg-slate-300'}`}>
                   <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${myProfile.notificationsEnabled ? 'translate-x-7' : 'translate-x-1'}`}></div>
                 </button>
               </div>
 
-              {/* Botones de acción */}
-              <div className="pt-4 border-t border-stone-100 space-y-3">
-                <button onClick={handleLogout} className="w-full py-3 rounded-full bg-stone-100 text-stone-800 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                <button onClick={handleLogout} className="w-full py-3 rounded-full bg-slate-100 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
                   <LogOut className="w-4 h-4" /> {t('logout')}
                 </button>
                 <button onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }} className="w-full py-3 rounded-full bg-red-50 text-red-500 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-red-100">
@@ -644,56 +623,51 @@ export default function App() {
         </div>
       )}
 
-      {/* Contenedor principal de la app */}
-      <div className="w-full max-w-md bg-white h-[100dvh] sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-stone-800 flex flex-col relative overflow-hidden shadow-2xl">
+      <div className="w-full max-w-md bg-white h-[100dvh] sm:h-[850px] sm:rounded-[3rem] sm:border-[8px] sm:border-slate-900 flex flex-col relative overflow-hidden shadow-2xl">
         
-        {/* CABECERA GENERAL */}
         {view !== 'welcome' && view !== 'auth' && view !== 'chat' && (
           <div className="bg-white border-b py-3 px-4 flex items-center justify-between z-10 shrink-0">
-            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-rose-500" /><h1 className="text-xl font-black text-rose-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
+            <div className="flex items-center gap-2"><Crown className="w-5 h-5 text-fuchsia-500" /><h1 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 to-violet-500 tracking-tighter uppercase leading-none">LigaRey</h1></div>
             <div className="flex items-center gap-2">
-              <button onClick={fetchData} className="p-2 text-stone-400 hover:text-rose-500 transition-colors active:rotate-180"><RefreshCcw className="w-4 h-4" /></button>
-              <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black border border-rose-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> {t('qr_title')}</button>
+              <button onClick={fetchData} className="p-2 text-slate-400 hover:text-fuchsia-500 transition-colors active:rotate-180"><RefreshCcw className="w-4 h-4" /></button>
+              <button onClick={() => setShowQRModal(true)} className="px-3 py-1.5 bg-fuchsia-50 text-fuchsia-600 rounded-full text-[10px] font-black border border-fuchsia-100 flex items-center gap-1"><QrCode className="w-3 h-3" /> {t('qr_title')}</button>
             </div>
           </div>
         )}
 
         <div className="flex-1 overflow-hidden relative flex flex-col">
           
-          {/* BIENVENIDA */}
           {view === 'welcome' && (
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-stone-50 animate-in fade-in relative">
-              {/* Selector de idioma pre-login */}
-              <div className="absolute top-4 right-4 bg-white px-2 py-1 rounded-full shadow-sm border border-stone-200">
-                <select value={myProfile.appLanguage} onChange={e => changeAppLanguage(e.target.value)} className="bg-transparent text-stone-500 text-[10px] font-black uppercase outline-none">
+            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-8 bg-slate-50 animate-in fade-in relative">
+              <div className="absolute top-4 right-4 bg-white px-2 py-1 rounded-full shadow-sm border border-slate-200">
+                <select value={myProfile.appLanguage} onChange={e => changeAppLanguage(e.target.value)} className="bg-transparent text-slate-500 text-[10px] font-black uppercase outline-none">
                   <option value="es">ES</option>
                   <option value="en">EN</option>
                   <option value="it">IT</option>
                 </select>
               </div>
 
-              <div className="w-32 h-32 bg-gradient-to-tr from-rose-500 to-orange-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
-              <h1 className="text-5xl font-black text-stone-900 tracking-tighter leading-none">LigaRey</h1>
-              <p className="text-stone-400 font-bold uppercase tracking-widest text-[10px]">{t('app_desc')}</p>
+              <div className="w-32 h-32 bg-gradient-to-tr from-fuchsia-600 to-cyan-400 rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-bounce"><Crown className="text-white w-16 h-16" /></div>
+              <h1 className="text-5xl font-black text-slate-900 tracking-tighter leading-none">LigaRey</h1>
+              <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">{t('app_desc')}</p>
               <div className="w-full max-w-xs space-y-4 pt-4">
-                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-rose-500 text-white font-bold shadow-xl active:scale-95 transition-all">{t('btn_create_free')}</button>
-                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-stone-800 border border-stone-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all">{t('btn_already_have')}</button>
+                <button onClick={() => { setAuthMode('register'); setView('auth'); }} className="w-full py-4 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white font-bold shadow-xl active:scale-95 transition-all">{t('btn_create_free')}</button>
+                <button onClick={() => { setAuthMode('login'); setView('auth'); }} className="w-full py-4 rounded-full bg-white text-slate-800 border border-slate-200 font-bold uppercase tracking-widest text-xs active:scale-95 transition-all hover:bg-slate-50">{t('btn_already_have')}</button>
               </div>
             </div>
           )}
 
-          {/* AUTENTICACIÓN */}
           {view === 'auth' && (
-            <div className="h-full p-6 bg-stone-50 animate-in slide-in-from-right overflow-y-auto">
-              <button onClick={() => setView('welcome')} className="p-2 text-stone-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
-              <h2 className="text-4xl font-black text-stone-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? t('auth_hi') : t('auth_reg')}</h2>
+            <div className="h-full p-6 bg-slate-50 animate-in slide-in-from-right overflow-y-auto">
+              <button onClick={() => setView('welcome')} className="p-2 text-slate-400 mb-6 active:scale-90 transition-transform"><ChevronLeft className="w-8 h-8" /></button>
+              <h2 className="text-4xl font-black text-slate-900 mb-8 tracking-tighter uppercase">{authMode === 'login' ? t('auth_hi') : t('auth_reg')}</h2>
               {authError && <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /> {authError}</p>}
               <form onSubmit={handleAuthSubmit} className="space-y-4">
-                <input type="email" required placeholder={t('email')} value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
+                <input type="email" required placeholder={t('email')} value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-200 outline-none focus:border-fuchsia-500 transition-colors shadow-sm" />
                 
                 <div className="relative">
-                  <input type={showPassword ? "text" : "password"} required placeholder={t('pass')} value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 pr-16 rounded-2xl border border-stone-200 outline-none focus:border-rose-500 transition-colors shadow-sm" />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 font-bold text-[10px] uppercase tracking-widest p-2">
+                  <input type={showPassword ? "text" : "password"} required placeholder={t('pass')} value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-4 pr-16 rounded-2xl border border-slate-200 outline-none focus:border-fuchsia-500 transition-colors shadow-sm" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-[10px] uppercase tracking-widest p-2">
                     {showPassword ? t('hide') : t('show')}
                   </button>
                 </div>
@@ -701,67 +675,65 @@ export default function App() {
                 {authMode === 'register' && (
                   <div className="space-y-3 pt-2 pb-4 text-left">
                     <label className="flex items-start gap-3 cursor-pointer">
-                      <input type="checkbox" checked={registerTerms.privacy} onChange={e => setRegisterTerms({...registerTerms, privacy: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
-                      <span className="text-[10px] text-stone-500 leading-tight">{t('terms_priv')} <span className="text-rose-500 font-bold">*</span></span>
+                      <input type="checkbox" checked={registerTerms.privacy} onChange={e => setRegisterTerms({...registerTerms, privacy: e.target.checked})} className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0" />
+                      <span className="text-[10px] text-slate-500 leading-tight">{t('terms_priv')} <span className="text-fuchsia-500 font-bold">*</span></span>
                     </label>
                     <label className="flex items-start gap-3 cursor-pointer">
-                      <input type="checkbox" checked={registerTerms.conduct} onChange={e => setRegisterTerms({...registerTerms, conduct: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
-                      <span className="text-[10px] text-stone-500 leading-tight">{t('terms_cond')} <span className="text-rose-500 font-bold">*</span></span>
+                      <input type="checkbox" checked={registerTerms.conduct} onChange={e => setRegisterTerms({...registerTerms, conduct: e.target.checked})} className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0" />
+                      <span className="text-[10px] text-slate-500 leading-tight">{t('terms_cond')} <span className="text-fuchsia-500 font-bold">*</span></span>
                     </label>
                     <label className="flex items-start gap-3 cursor-pointer">
-                      <input type="checkbox" checked={registerTerms.newsletter} onChange={e => setRegisterTerms({...registerTerms, newsletter: e.target.checked})} className="mt-1 w-4 h-4 accent-rose-500 shrink-0" />
-                      <span className="text-[10px] text-stone-500 leading-tight">{t('terms_news')}</span>
+                      <input type="checkbox" checked={registerTerms.newsletter} onChange={e => setRegisterTerms({...registerTerms, newsletter: e.target.checked})} className="mt-1 w-4 h-4 accent-fuchsia-500 shrink-0" />
+                      <span className="text-[10px] text-slate-500 leading-tight">{t('terms_news')}</span>
                     </label>
                   </div>
                 )}
 
-                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-stone-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 flex items-center justify-center transition-all mt-2">
+                <button type="submit" disabled={isAuthLoading} className="w-full py-4 bg-slate-900 text-white rounded-full font-bold h-14 shadow-lg active:scale-95 flex items-center justify-center transition-all mt-2 hover:bg-slate-800">
                    {isAuthLoading ? <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> : (authMode === 'login' ? t('btn_enter') : t('btn_create_vip'))}
                 </button>
               </form>
-              <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="w-full mt-6 text-stone-500 text-xs font-bold uppercase tracking-widest leading-none">
+              <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="w-full mt-6 text-slate-500 text-xs font-bold uppercase tracking-widest leading-none">
                 {authMode === 'login' ? t('no_account') : t('yes_account')}
               </button>
             </div>
           )}
 
-          {/* PERFIL */}
           {view === 'register' && (
-            <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-stone-50">
+            <div className="h-full flex flex-col p-6 overflow-y-auto pb-24 bg-slate-50">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-black uppercase tracking-tighter">{t('prof_title')}</h2>
-                <button onClick={() => setShowSettings(true)} className="p-2 bg-stone-200 rounded-full text-stone-600 hover:bg-stone-300 transition-colors active:scale-95 shadow-inner">
+                <button onClick={() => setShowSettings(true)} className="p-2 bg-slate-200 rounded-full text-slate-600 hover:bg-slate-300 transition-colors active:scale-95 shadow-inner">
                   <Settings className="w-5 h-5" />
                 </button>
               </div>
               
-              <div className="flex justify-center mb-6 bg-stone-200 rounded-full p-1 shadow-inner shrink-0">
-                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-stone-800' : 'text-stone-400'}`}>{t('tab_data')}</button>
-                <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-stone-800' : 'text-stone-400'}`}>{t('tab_preview')}</button>
+              <div className="flex justify-center mb-6 bg-slate-200 rounded-full p-1 shadow-inner shrink-0">
+                <button onClick={() => setProfileMode('edit')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'edit' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}>{t('tab_data')}</button>
+                <button onClick={() => setProfileMode('preview')} className={`flex-1 py-2 rounded-full font-bold text-xs transition-all ${profileMode === 'preview' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}>{t('tab_preview')}</button>
               </div>
               
               {profileMode === 'edit' ? (
                 <div className="space-y-6">
                   {photoError && <p className="text-red-500 text-[10px] font-bold text-center bg-red-50 p-2 rounded-lg border border-red-100">{photoError}</p>}
                   
-                  {/* Foto */}
                   <div className="flex flex-col items-center">
-                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-stone-800 shadow-xl bg-stone-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-rose-400 transition-colors">
-                      {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-stone-400 w-8 h-8" />}
+                    <div onClick={() => fileInputRef.current.click()} className="w-32 h-32 rounded-full border-4 border-slate-800 shadow-xl bg-slate-200 overflow-hidden flex items-center justify-center cursor-pointer hover:border-fuchsia-400 transition-colors">
+                      {myProfile.photo ? <img src={myProfile.photo} className="w-full h-full object-cover" /> : <Camera className="text-slate-400 w-8 h-8" />}
                     </div>
                     <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
                   </div>
 
-                  <input type="text" placeholder={t('name_req')} value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
+                  <input type="text" placeholder={t('name_req')} value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-200 outline-none focus:border-fuchsia-400 shadow-sm" />
                   
                   <div className="flex flex-col gap-4">
-                    <select value={myProfile.pais} onChange={e => setMyProfile({...myProfile, pais: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm bg-white text-stone-600 text-sm">
+                    <select value={myProfile.pais} onChange={e => setMyProfile({...myProfile, pais: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-200 outline-none focus:border-fuchsia-400 shadow-sm bg-white text-slate-600 text-sm">
                       <option value="">{t('nation')}</option>
                       {PAISES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                     
                     <div className="space-y-2">
-                      <p className="text-[10px] font-black text-stone-500 uppercase tracking-widest px-2">{t('spoken_lang')}</p>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2">{t('spoken_lang')}</p>
                       <div className="flex flex-wrap gap-2">
                         {IDIOMAS.map(lang => (
                           <button key={lang} type="button" onClick={() => {
@@ -769,55 +741,54 @@ export default function App() {
                               ? myProfile.idiomas.filter(i => i !== lang) 
                               : [...(myProfile.idiomas || []), lang];
                             setMyProfile({...myProfile, idiomas: list});
-                          }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${(myProfile.idiomas || []).includes(lang) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500 hover:bg-stone-50'}`}>{lang}</button>
+                          }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${(myProfile.idiomas || []).includes(lang) ? 'bg-fuchsia-500 border-fuchsia-500 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>{lang}</button>
                         ))}
                       </div>
                     </div>
                   </div>
 
-                  <input type="text" placeholder={t('phrase_req')} value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm italic" />
-                  <textarea placeholder={t('looking_req')} value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none h-20 focus:border-rose-400 shadow-sm" />
+                  <input type="text" placeholder={t('phrase_req')} value={myProfile.phrase} onChange={e => setMyProfile({...myProfile, phrase: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-200 outline-none focus:border-fuchsia-400 shadow-sm italic" />
+                  <textarea placeholder={t('looking_req')} value={myProfile.lookingFor} onChange={e => setMyProfile({...myProfile, lookingFor: e.target.value})} className="w-full p-4 rounded-2xl border border-slate-200 outline-none h-20 focus:border-fuchsia-400 shadow-sm" />
                   
                   <div className="flex flex-wrap gap-2">
                     {INTERESES_COMUNES.slice(0, 10).map((int, idx) => (
                       <button key={idx} onClick={() => {
                         const list = (myProfile.interests || []).includes(int) ? myProfile.interests.filter(i => i !== int) : [...(myProfile.interests || []), int].slice(0, 5);
                         setMyProfile({...myProfile, interests: list});
-                      }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500'}`}>{int}</button>
+                      }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${myProfile.interests?.includes(int) ? 'bg-fuchsia-500 border-fuchsia-500 text-white shadow-md' : 'bg-white text-slate-500'}`}>{int}</button>
                     ))}
                   </div>
                   <div className="pt-6">
-                    {saveMessage && <p className="text-green-600 text-center font-bold text-xs mb-3">{saveMessage}</p>}
-                    <button onClick={saveProfileData} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">{t('save_changes')}</button>
+                    {saveMessage && <p className="text-emerald-500 text-center font-bold text-xs mb-3">{saveMessage}</p>}
+                    <button onClick={saveProfileData} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all hover:bg-slate-800">{t('save_changes')}</button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-stone-200 bg-stone-200 animate-in fade-in">
+                <div className="flex-1 min-h-[400px] relative rounded-[2.5rem] overflow-hidden shadow-2xl border border-slate-200 bg-slate-200 animate-in fade-in">
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
                 <h2 className="text-3xl font-black mb-1 leading-none">{myProfile.name || 'Sin nombre'}</h2>
                 
-                <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
+                <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-fuchsia-300">
                   <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {myProfile.pais || t('unknown')}</div>
                   <span className="opacity-40">•</span>
                   <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {myProfile.idiomas?.join(', ') || t('unknown')}</div>
                 </div>
 
-                <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p>
+                <p className="text-fuchsia-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p>
                     <p className="text-white/60 text-[10px] uppercase font-black tracking-widest mb-3 leading-none">{t('looking_for')} {myProfile.lookingFor}</p>
                     <div className="flex flex-wrap gap-2">{(myProfile.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[9px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                   </div>
                 </div>
               )}
-              <button onClick={handleGoToPista} className="w-full py-5 mt-8 rounded-full bg-rose-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all shrink-0">{t('to_pista')}</button>
+              <button onClick={handleGoToPista} className="w-full py-5 mt-8 rounded-full bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white font-black text-lg shadow-xl uppercase h-16 active:scale-95 transition-all shrink-0">{t('to_pista')}</button>
             </div>
           )}
 
-          {/* DISCOVER (LA PISTA) */}
           {view === 'discover' && (
             <div 
-              className="h-full flex flex-col p-4 bg-rose-500 relative animate-in fade-in"
+              className="h-full flex flex-col p-4 bg-gradient-to-br from-fuchsia-500 to-violet-600 relative animate-in fade-in"
               style={{ 
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23ffffff' fill-opacity='0.15'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
               }}
@@ -825,61 +796,60 @@ export default function App() {
               {showMatchAnimation && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/90 backdrop-blur-md">
                   <div className="text-center animate-in zoom-in">
-                    <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-2xl mx-auto mb-4 border-4 border-stone-50">{showMatchAnimation === 'beer' && <Beer className="text-amber-500 fill-current w-12 h-12" />}{showMatchAnimation === 'hand' && <Hand className="text-green-500 fill-current w-12 h-12" />}{showMatchAnimation === 'dislike' && <X className="text-red-500 w-12 h-12" />}</div>
+                    <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-2xl mx-auto mb-4 border-4 border-slate-50">{showMatchAnimation === 'beer' && <Beer className="text-amber-500 fill-current w-12 h-12" />}{showMatchAnimation === 'hand' && <Hand className="text-violet-500 fill-current w-12 h-12" />}{showMatchAnimation === 'dislike' && <X className="text-fuchsia-500 w-12 h-12" />}</div>
                     <h2 className="text-2xl font-black uppercase italic tracking-tighter">{showMatchAnimation === 'dislike' ? t('passed') : t('sent')}</h2>
                   </div>
                 </div>
               )}
               
-              <div className={`flex-1 min-h-0 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 transition-all duration-500 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-emerald-500 shadow-emerald-500/20' : 'border-stone-200'}`}>
+              <div className={`flex-1 min-h-0 relative rounded-[2.5rem] overflow-hidden shadow-2xl bg-white border-4 transition-all duration-500 ${profiles[currentIndex]?.isAlreadyMatched ? 'border-cyan-500 shadow-cyan-500/20' : 'border-slate-200'}`}>
                 {profiles[currentIndex] ? (
                   <>
                     <img src={profiles[currentIndex]?.photo || DEFAULT_AVATAR} className="absolute inset-0 w-full h-full object-cover" />
                     {profiles[currentIndex]?.isAlreadyMatched && (
-                      <div className="absolute top-4 right-4 z-10 bg-emerald-500 text-white px-3 py-1.5 rounded-full font-black text-[10px] uppercase shadow-xl flex items-center gap-2">
+                      <div className="absolute top-4 right-4 z-10 bg-cyan-500 text-white px-3 py-1.5 rounded-full font-black text-[10px] uppercase shadow-xl flex items-center gap-2">
                         <Check className="w-3 h-3" /> {t('in_chat')}
                       </div>
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent"></div>
                     <div className="absolute bottom-0 p-6 text-white w-full">
-                      <div className="flex items-center gap-2 mb-1"><h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>{profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-emerald-400" />}</div>
+                      <div className="flex items-center gap-2 mb-1"><h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>{profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-cyan-400" />}</div>
                   
-                  <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
+                  <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-fuchsia-300">
                     <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {profiles[currentIndex]?.pais || t('unknown')}</div>
                     <span className="opacity-40">•</span>
                     <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {profiles[currentIndex]?.idiomas?.join(', ') || t('unknown')}</div>
                   </div>
 
-                  <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase}"</p>
+                  <p className="text-fuchsia-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase}"</p>
                       <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-2 leading-none">{t('looking_for')} {profiles[currentIndex]?.lookingFor}</p>
                       <div className="flex flex-wrap gap-2">{(profiles[currentIndex]?.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-stone-400 p-8 text-center gap-4 opacity-40">
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center gap-4 opacity-40">
                     <Sparkles className="w-12 h-12" />
                     <p className="font-bold italic">{t('nobody_new')}</p>
-                    <button onClick={fetchData} className="text-rose-500 uppercase font-black text-xs border-b-2 border-rose-500 pb-1">{t('refresh')}</button>
+                    <button onClick={fetchData} className="text-fuchsia-500 uppercase font-black text-xs border-b-2 border-fuchsia-500 pb-1">{t('refresh')}</button>
                   </div>
                 )}
               </div>
               <div className="flex justify-center items-center gap-4 py-4 shrink-0">
-                <button onClick={() => handleMatchAction('beer')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500' : 'bg-amber-400'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Beer className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />}</button>
-                <button onClick={() => handleMatchAction('dislike')} className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white text-rose-500 flex items-center justify-center shadow-xl active:scale-90"><X className="w-6 h-6 sm:w-7 sm:h-7" /></button>
-                <button onClick={() => handleMatchAction('hand')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-emerald-500' : 'bg-green-500'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Hand className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />}</button>
+                <button onClick={() => handleMatchAction('beer')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-cyan-500' : 'bg-amber-400'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Beer className="w-6 h-6 sm:w-8 sm:h-8 fill-current text-slate-900" />}</button>
+                <button onClick={() => handleMatchAction('dislike')} className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white text-fuchsia-500 flex items-center justify-center shadow-xl active:scale-90 hover:bg-slate-50"><X className="w-6 h-6 sm:w-7 sm:h-7" /></button>
+                <button onClick={() => handleMatchAction('hand')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-cyan-500' : 'bg-violet-500'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Hand className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />}</button>
               </div>
             </div>
           )}
 
-          {/* MENSAJES */}
           {view === 'messages' && (
-            <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
+            <div className="h-full p-6 bg-slate-50 overflow-y-auto animate-in slide-in-from-right">
               <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter">{t('my_chats')}</h2>
               <div className="space-y-3">
                 {activeChats.map((chat) => (
-                  <div key={chat.id} onClick={() => { setActiveChatUser(chat); setView('chat'); }} className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 flex items-center gap-4 cursor-pointer active:scale-95 transition-all">
-                    <img src={chat.photo || DEFAULT_AVATAR} className="w-14 h-14 rounded-full object-cover border-2 border-emerald-100 shadow-sm" />
-                    <div className="flex-1"><p className="text-lg font-bold text-stone-800 tracking-tight leading-none mb-1">{chat.name}</p><p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest leading-none">{t('chat_open')}</p></div>
+                  <div key={chat.id} onClick={() => { setActiveChatUser(chat); setView('chat'); }} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4 cursor-pointer active:scale-95 transition-all hover:bg-slate-50">
+                    <img src={chat.photo || DEFAULT_AVATAR} className="w-14 h-14 rounded-full object-cover border-2 border-cyan-100 shadow-sm" />
+                    <div className="flex-1"><p className="text-lg font-bold text-slate-800 tracking-tight leading-none mb-1">{chat.name}</p><p className="text-[10px] text-cyan-500 font-black uppercase tracking-widest leading-none">{t('chat_open')}</p></div>
                   </div>
                 ))}
                 {activeChats.length === 0 && <div className="mt-20 text-center opacity-30 px-8"><MessageCircle className="w-12 h-12 mx-auto mb-4" /><p className="text-sm font-bold uppercase tracking-widest">{t('no_chats')}</p></div>}
@@ -887,24 +857,23 @@ export default function App() {
             </div>
           )}
 
-          {/* CHAT ACTIVO */}
           {view === 'chat' && activeChatUser && (
-            <div className="h-full flex flex-col bg-stone-50 animate-in slide-in-from-right duration-300">
+            <div className="h-full flex flex-col bg-slate-50 animate-in slide-in-from-right duration-300">
               <div className="p-4 bg-white border-b flex items-center justify-between z-10 shadow-sm shrink-0">
                 <div className="flex items-center gap-3">
-                  <button onClick={() => setView('messages')} className="p-1 active:scale-90 transition-transform"><ChevronLeft className="w-7 h-7 text-stone-400" /></button>
+                  <button onClick={() => setView('messages')} className="p-1 active:scale-90 transition-transform"><ChevronLeft className="w-7 h-7 text-slate-400" /></button>
                   <div onClick={() => setShowInspector(activeChatUser)} className="flex items-center gap-3 cursor-pointer active:opacity-60 transition-opacity">
-                    <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-10 h-10 rounded-full object-cover shadow-sm border border-rose-100" />
-                    <div><h3 className="font-black text-stone-800 uppercase leading-none">{activeChatUser.name}</h3><p className="text-[9px] font-black uppercase text-rose-500 tracking-widest mt-1 leading-none">{t('view_vip')}</p></div>
+                    <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-10 h-10 rounded-full object-cover shadow-sm border border-fuchsia-100" />
+                    <div><h3 className="font-black text-slate-800 uppercase leading-none">{activeChatUser.name}</h3><p className="text-[9px] font-black uppercase text-fuchsia-500 tracking-widest mt-1 leading-none">{t('view_vip')}</p></div>
                   </div>
                 </div>
-                <button onClick={() => deleteConversation(activeChatUser.id)} className="p-2 text-stone-300 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+                <button onClick={() => deleteConversation(activeChatUser.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
               </div>
               
               <div 
-                className="flex-1 p-4 overflow-y-auto space-y-4 bg-stone-50 min-h-0 relative"
+                className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50 min-h-0 relative"
                 style={{ 
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23f43f5e' fill-opacity='0.04'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23d946ef' fill-opacity='0.04'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
                 }}
               >
                 {chatMessages.map((m) => {
@@ -912,21 +881,20 @@ export default function App() {
                   return (
                     <div key={m.id} className={`flex gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
                       {!isMe && <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover shrink-0 mt-auto shadow-sm" />}
-                      <div className={`p-4 rounded-3xl max-w-[75%] text-sm font-medium shadow-sm ${isMe ? 'bg-rose-500 text-white rounded-br-none' : 'bg-white text-stone-700 rounded-bl-none border border-stone-100'}`}>
+                      <div className={`p-4 rounded-3xl max-w-[75%] text-sm font-medium shadow-sm ${isMe ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white rounded-br-none' : 'bg-white text-slate-700 rounded-bl-none border border-slate-100'}`}>
                         {m.text}
                       </div>
                     </div>
                   );
                 })}
                 
-                {/* INDICADOR DE QUE EL OTRO ESTÁ ESCRIBIENDO */}
                 {otherIsTyping && (
                   <div className="flex gap-2 justify-start animate-in fade-in slide-in-from-bottom-2">
                     <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover shrink-0 mt-auto shadow-sm" />
-                    <div className="p-4 rounded-3xl bg-white text-stone-700 rounded-bl-none border border-stone-100 shadow-sm flex items-center gap-1.5 h-[52px]">
-                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="p-4 rounded-3xl bg-white text-slate-700 rounded-bl-none border border-slate-100 shadow-sm flex items-center gap-1.5 h-[52px]">
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   </div>
                 )}
@@ -937,24 +905,22 @@ export default function App() {
                 e.preventDefault(); if (!newMessageText.trim()) return;
                 addDoc(chatsCol, { from: user.uid, fromName: myProfile.name, to: activeChatUser.id, text: newMessageText, timestamp: new Date().toISOString() });
                 setNewMessageText('');
-                // Limpiamos el estado de tecleando al enviar
                 if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
                 setDoc(doc(typingCol, user.uid), { typingTo: null }, { merge: true });
               }} className="p-4 bg-white border-t flex gap-2 shrink-0">
-                <input value={newMessageText} onChange={handleTypingChange} placeholder={t('write')} className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
-                <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg"><Send className="w-5 h-5 ml-1" /></button>
+                <input value={newMessageText} onChange={handleTypingChange} placeholder={t('write')} className="flex-1 bg-slate-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-fuchsia-100 transition-all shadow-inner text-slate-800" />
+                <button type="submit" className="w-12 h-12 bg-gradient-to-r from-fuchsia-500 to-violet-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg"><Send className="w-5 h-5 ml-1" /></button>
               </form>
             </div>
           )}
 
-          {/* NOTIFICACIONES */}
           {view === 'notifications' && (
-            <div className="h-full p-6 bg-stone-50 overflow-y-auto animate-in slide-in-from-right">
-              <div className="flex items-center justify-between mb-6"><h2 className="text-3xl font-black uppercase tracking-tighter leading-none">{t('activity')}</h2><button onClick={() => { setNotifications([]); setHasUnreadNotifs(false); }} className="p-2 text-stone-400 hover:text-rose-500 transition-colors flex items-center gap-1"><Eraser className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">{t('clear')}</span></button></div>
+            <div className="h-full p-6 bg-slate-50 overflow-y-auto animate-in slide-in-from-right">
+              <div className="flex items-center justify-between mb-6"><h2 className="text-3xl font-black uppercase tracking-tighter leading-none">{t('activity')}</h2><button onClick={() => { setNotifications([]); setHasUnreadNotifs(false); }} className="p-2 text-slate-400 hover:text-fuchsia-500 transition-colors flex items-center gap-1"><Eraser className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">{t('clear')}</span></button></div>
               <div className="space-y-3">
                 {notifications.map((notif) => (
-                  <div key={notif.id} onClick={() => { setActiveChatUser({ id: notif.from, name: notif.fromName }); setView('chat'); }} className="bg-stone-900 text-white p-4 rounded-3xl shadow-lg flex items-center gap-4 cursor-pointer active:scale-95 transition-all">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.isMessage ? 'bg-rose-500' : 'bg-amber-500'}`}>{notif.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5" />}</div>
+                  <div key={notif.id} onClick={() => { setActiveChatUser({ id: notif.from, name: notif.fromName }); setView('chat'); }} className="bg-slate-900 text-white p-4 rounded-3xl shadow-lg flex items-center gap-4 cursor-pointer active:scale-95 transition-all hover:bg-slate-800">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.isMessage ? 'bg-fuchsia-500' : 'bg-amber-400'}`}>{notif.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-slate-900" />}</div>
                     <div className="flex-1"><p className="text-xs font-bold leading-tight"><b>{notif.fromName}</b> {notif.isMessage ? t('wrote_you') : t('greeted_you')}</p></div>
                   </div>
                 ))}
@@ -964,40 +930,37 @@ export default function App() {
           )}
         </div>
 
-        {/* NAVEGACIÓN INFERIOR */}
         {['discover', 'register', 'messages', 'notifications'].includes(view) && (
           <div className="bg-white border-t p-4 flex justify-around pb-6 shrink-0 z-20">
-            <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Flame className="w-7 h-7" /></button>
-            <button onClick={() => setView('messages')} className={`p-2 relative transition-all ${view === 'messages' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><MessageCircle className="w-7 h-7" />{hasUnreadMessages && <span className="absolute top-2 right-2 w-3 h-3 bg-rose-500 border-2 border-white rounded-full animate-pulse"></span>}</button>
-            <button onClick={() => { setView('notifications'); setHasUnreadNotifs(false); }} className={`p-2 relative transition-all ${view === 'notifications' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><Bell className="w-7 h-7" />{hasUnreadNotifs && <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 border-2 border-white rounded-full animate-pulse"></span>}</button>
-            <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-rose-500 scale-110' : 'text-stone-300'}`}><User className="w-7 h-7" /></button>
+            <button onClick={() => setView('discover')} className={`p-2 transition-all ${view === 'discover' ? 'text-fuchsia-500 scale-110' : 'text-slate-300'}`}><Flame className="w-7 h-7" /></button>
+            <button onClick={() => setView('messages')} className={`p-2 relative transition-all ${view === 'messages' ? 'text-fuchsia-500 scale-110' : 'text-slate-300'}`}><MessageCircle className="w-7 h-7" />{hasUnreadMessages && <span className="absolute top-2 right-2 w-3 h-3 bg-fuchsia-500 border-2 border-white rounded-full animate-pulse"></span>}</button>
+            <button onClick={() => { setView('notifications'); setHasUnreadNotifs(false); }} className={`p-2 relative transition-all ${view === 'notifications' ? 'text-fuchsia-500 scale-110' : 'text-slate-300'}`}><Bell className="w-7 h-7" />{hasUnreadNotifs && <span className="absolute top-2 right-2 w-3 h-3 bg-cyan-500 border-2 border-white rounded-full animate-pulse"></span>}</button>
+            <button onClick={() => setView('register')} className={`p-2 transition-all ${view === 'register' ? 'text-fuchsia-500 scale-110' : 'text-slate-300'}`}><User className="w-7 h-7" /></button>
           </div>
         )}
 
-        {/* MODAL ELIMINAR CUENTA */}
         {showDeleteConfirm && (
-          <div className="absolute inset-0 z-[600] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
+          <div className="absolute inset-0 z-[600] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl">
               <div className="mx-auto w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4"><AlertCircle className="w-8 h-8" /></div>
-              <h3 className="text-2xl font-black text-stone-800 mb-2 uppercase leading-none">{t('del_title')}</h3>
-              <p className="text-stone-500 mb-8 text-sm italic">{t('del_desc')}</p>
+              <h3 className="text-2xl font-black text-slate-800 mb-2 uppercase leading-none">{t('del_title')}</h3>
+              <p className="text-slate-500 mb-8 text-sm italic">{t('del_desc')}</p>
               <div className="space-y-3">
                 <button onClick={handleDeleteAccount} className="w-full py-4 rounded-full bg-red-500 text-white font-bold text-lg active:scale-95 transition-all">{t('yes_del')}</button>
-                <button onClick={() => setShowDeleteConfirm(false)} className="w-full py-4 rounded-full bg-stone-100 text-stone-800 font-bold text-lg active:scale-95 transition-all">{t('cancel')}</button>
+                <button onClick={() => setShowDeleteConfirm(false)} className="w-full py-4 rounded-full bg-slate-100 text-slate-800 font-bold text-lg active:scale-95 transition-all">{t('cancel')}</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* MODAL QR DESCUENTO */}
         {showQRModal && (
-          <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
+          <div className="absolute inset-0 z-[200] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in">
-              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800 transition-colors"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-stone-800 mb-2 tracking-tighter uppercase font-black leading-none">{t('qr_title')}</h3>
-              <p className="text-sm text-stone-600 mb-6 leading-tight">{t('qr_explanation')}</p>
+              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-800 transition-colors"><X className="w-6 h-6" /></button>
+              <h3 className="text-2xl font-black text-slate-800 mb-2 tracking-tighter uppercase font-black leading-none">{t('qr_title')}</h3>
+              <p className="text-sm text-slate-600 mb-6 leading-tight">{t('qr_explanation')}</p>
               <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${user?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply mx-auto mb-4" />
-              <p className="text-[10px] text-stone-500 uppercase font-black tracking-widest opacity-60 leading-none">{t('qr_desc')}</p>
+              <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest opacity-60 leading-none">{t('qr_desc')}</p>
             </div>
           </div>
         )}
