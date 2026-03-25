@@ -959,12 +959,18 @@ export default function App() {
 
         {showQRModal && (
           <div className="absolute inset-0 z-[200] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
-            <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in">
-              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-800 transition-colors"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-slate-800 mb-2 tracking-tighter uppercase font-black leading-none">{t('qr_title')}</h3>
-              <p className="text-sm text-slate-600 mb-6 leading-tight">{t('qr_explanation')}</p>
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${user?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply mx-auto mb-4" />
-              <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest opacity-60 leading-none">{t('qr_desc')}</p>
+            <div className="bg-fuchsia-500 rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in border-4 border-fuchsia-400">
+              <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-fuchsia-200 hover:text-white transition-colors"><X className="w-6 h-6" /></button>
+              <h3 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase leading-none">{t('qr_title')}</h3>
+              <p className="text-sm text-fuchsia-100 mb-6 leading-tight">{t('qr_explanation')}</p>
+              
+              {/* Fondo blanco puro para garantizar que las cámaras lean bien el QR */}
+              <div className="bg-white p-4 rounded-3xl mx-auto w-fit mb-6 shadow-inner">
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${user?.uid}`} alt="QR" className="w-48 h-48" />
+              </div>
+              
+              <p className="text-xl font-black text-white mb-1 uppercase tracking-widest">{myProfile?.name}</p>
+              <p className="text-[10px] text-fuchsia-200 uppercase font-black tracking-widest opacity-80 leading-none">{t('qr_desc')}</p>
             </div>
           </div>
         )}
