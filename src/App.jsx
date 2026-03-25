@@ -788,7 +788,7 @@ export default function App() {
 
           {view === 'discover' && (
             <div 
-              className="h-full flex flex-col p-4 bg-blue-600 relative animate-in fade-in"
+              className="h-full flex flex-col p-4 bg-fuchsia-500 relative animate-in fade-in"
               style={{ 
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23ffffff' fill-opacity='0.15'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
               }}
