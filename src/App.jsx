@@ -552,7 +552,7 @@ export default function App() {
         <div onClick={() => { setActiveChatUser({ id: newNotificationToast.from, name: newNotificationToast.fromName }); setView('chat'); setNewNotificationToast(null); }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[400] w-full max-w-[340px] px-4 animate-in slide-in-from-top cursor-pointer">
           <div className="bg-slate-900 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-4 border border-white/10 backdrop-blur-xl">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${newNotificationToast.isMessage ? 'bg-fuchsia-500' : 'bg-amber-400'}`}>
-              {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-slate-900" />}
+              {newNotificationToast.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-white" />}
             </div>
             <div className="flex-1"><p className="text-[9px] font-black uppercase text-fuchsia-400">{t('toast_vip')}</p><p className="text-xs font-bold truncate"><b>{newNotificationToast.fromName}</b> {newNotificationToast.isMessage ? t('wrote_you') : t('greeted_you')}</p></div>
           </div>
@@ -788,7 +788,7 @@ export default function App() {
 
           {view === 'discover' && (
             <div 
-              className="h-full flex flex-col p-4 bg-gradient-to-br from-fuchsia-500 to-violet-600 relative animate-in fade-in"
+              className="h-full flex flex-col p-4 bg-fuchsia-500 relative animate-in fade-in"
               style={{ 
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23ffffff' fill-opacity='0.15'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
               }}
@@ -835,7 +835,7 @@ export default function App() {
                 )}
               </div>
               <div className="flex justify-center items-center gap-4 py-4 shrink-0">
-                <button onClick={() => handleMatchAction('beer')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-cyan-500' : 'bg-amber-400'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Beer className="w-6 h-6 sm:w-8 sm:h-8 fill-current text-slate-900" />}</button>
+                <button onClick={() => handleMatchAction('beer')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-cyan-500' : 'bg-amber-400'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Beer className="w-6 h-6 sm:w-8 sm:h-8 fill-current text-white" />}</button>
                 <button onClick={() => handleMatchAction('dislike')} className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white text-fuchsia-500 flex items-center justify-center shadow-xl active:scale-90 hover:bg-slate-50"><X className="w-6 h-6 sm:w-7 sm:h-7" /></button>
                 <button onClick={() => handleMatchAction('hand')} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${profiles[currentIndex]?.isAlreadyMatched ? 'bg-cyan-500' : 'bg-violet-500'} text-white`}>{profiles[currentIndex]?.isAlreadyMatched ? <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8" /> : <Hand className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />}</button>
               </div>
@@ -920,7 +920,7 @@ export default function App() {
               <div className="space-y-3">
                 {notifications.map((notif) => (
                   <div key={notif.id} onClick={() => { setActiveChatUser({ id: notif.from, name: notif.fromName }); setView('chat'); }} className="bg-slate-900 text-white p-4 rounded-3xl shadow-lg flex items-center gap-4 cursor-pointer active:scale-95 transition-all hover:bg-slate-800">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.isMessage ? 'bg-fuchsia-500' : 'bg-amber-400'}`}>{notif.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-slate-900" />}</div>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.isMessage ? 'bg-fuchsia-500' : 'bg-amber-400'}`}>{notif.isMessage ? <MessageCircle className="w-5 h-5" /> : <Beer className="w-5 h-5 text-white" />}</div>
                     <div className="flex-1"><p className="text-xs font-bold leading-tight"><b>{notif.fromName}</b> {notif.isMessage ? t('wrote_you') : t('greeted_you')}</p></div>
                   </div>
                 ))}
