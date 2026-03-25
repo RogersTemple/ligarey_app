@@ -26,7 +26,7 @@
     <!-- Visor de la cámara -->
     <div class="flex-1 flex flex-col items-center justify-center p-6 relative">
         
-        <!-- Pantalla de Inicio (Requisito para activar cámara en móviles) -->
+        <!-- Pantalla de Inicio -->
         <div id="start-container" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-20 animate-in fade-in">
             <div class="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 shadow-xl border-4 border-slate-800">
                 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-fuchsia-500"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
@@ -34,20 +34,19 @@
             <button id="start-btn" class="px-8 py-4 bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white font-black uppercase tracking-widest rounded-full shadow-[0_0_40px_-10px_rgba(217,70,239,0.5)] active:scale-95 transition-all">
                 Activar Cámara
             </button>
-            <p class="mt-6 text-slate-500 text-xs font-bold text-center px-12 uppercase tracking-widest">Pulsa para permitir el acceso a la cámara y escanear pases</p>
+            <p class="mt-6 text-slate-500 text-xs font-bold text-center px-12 uppercase tracking-widest">Pulsa para permitir el acceso a la cámara</p>
         </div>
 
-        <!-- Contenedor del Lector QR (Oculto al inicio) -->
+        <!-- Contenedor del Lector QR -->
         <div class="w-full max-w-md relative hidden" id="reader-container">
             <div id="reader" class="w-full shadow-2xl shadow-fuchsia-500/20"></div>
-            <!-- Marco visual superpuesto -->
             <div class="absolute inset-0 pointer-events-none border-4 border-fuchsia-500/50 rounded-[1.5rem] z-10"></div>
         </div>
         
         <p id="status-text" class="mt-6 text-slate-400 text-sm font-bold uppercase tracking-widest text-center hidden">Esperando cámara...</p>
     </div>
 
-    <!-- Modal de Carga (Mensaje Box) -->
+    <!-- Modal de Carga -->
     <div id="loading-modal" class="hidden absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
         <div class="bg-slate-900 rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl border border-slate-800 flex flex-col items-center">
             <div class="w-12 h-12 border-4 border-fuchsia-500 border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -94,13 +93,12 @@
             </div>
             <h3 id="error-title" class="text-2xl font-black text-slate-800 mb-2 uppercase leading-none">Error</h3>
             <p id="error-msg" class="text-slate-500 mb-8 text-sm font-bold">QR Inválido</p>
-            <button onclick="resumeScanning()" class="w-full py-4 rounded-full bg-red-500 text-white font-black text-lg active:scale-95 transition-all">INTENTAR DE NUEVO</button>
+            <button onclick="resumeScanning()" class="w-full py-4 rounded-full bg-red-500 text-white font-black text-lg active:scale-95 transition-all">ENTENDIDO</button>
         </div>
     </div>
 
     <!-- Lógica de Firebase y Escáner -->
     <script type="module">
-        // Importar Firebase (mismas credenciales que la App principal)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -121,8 +119,8 @@
 
         let html5QrCode;
         let isScanningAllowed = false;
+        let isFirebaseReady = false;
 
-        // Elementos UI
         const startContainer = document.getElementById('start-container');
         const readerContainer = document.getElementById('reader-container');
         const startBtn = document.getElementById('start-btn');
@@ -131,64 +129,58 @@
         const errorModal = document.getElementById('error-modal');
         const statusText = document.getElementById('status-text');
 
-        // Escuchar el clic del botón de Iniciar
-        startBtn.addEventListener('click', () => {
+        // 1. Intentar conectar a Firebase de fondo
+        async function connectFirebase() {
+            try {
+                await signInAnonymously(auth);
+                isFirebaseReady = true;
+                console.log("Firebase conectado correctamente.");
+            } catch (error) {
+                console.warn("Fallo Firebase Auth. Si el error persiste al leer un QR, activa 'Acceso Anónimo' en Firebase Authentication.", error);
+            }
+        }
+        
+        // Ejecutar conexión sin bloquear la UI
+        connectFirebase();
+
+        // 2. Encender cámara al hacer clic
+        startBtn.addEventListener('click', async () => {
             startContainer.classList.add('hidden');
             readerContainer.classList.remove('hidden');
             statusText.classList.remove('hidden');
-            initScanner();
-        });
-
-        // Inicializar el motor de la cámara
-        async function initScanner() {
             statusText.innerText = "Iniciando cámara...";
             statusText.classList.add('animate-pulse');
 
             try {
-                // Autenticación anónima necesaria para leer la base de datos
-                await signInAnonymously(auth);
-                
                 html5QrCode = new Html5Qrcode("reader");
                 const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+                const devices = await Html5Qrcode.getCameras();
                 
-                try {
-                    // Pedir lista de cámaras para asegurar compatibilidad
-                    const devices = await Html5Qrcode.getCameras();
-                    
-                    if (devices && devices.length > 0) {
-                        try {
-                            // Intento 1: Pedir específicamente la cámara trasera
-                            await html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure);
-                            isScanningAllowed = true;
-                            statusText.innerText = "Apuntando al QR del cliente...";
-                        } catch (envError) {
-                            // Intento 2: Si falla, coger la última cámara de la lista (suele ser la trasera)
-                            console.warn("Fallo cámara principal, usando secundaria...", envError);
-                            const fallbackCamera = devices[devices.length - 1].id;
-                            await html5QrCode.start(fallbackCamera, config, onScanSuccess, onScanFailure);
-                            isScanningAllowed = true;
-                            statusText.innerText = "Apuntando al QR del cliente...";
-                        }
-                    } else {
-                        showError("Sin Cámaras", "No se detectaron cámaras en este móvil.");
+                if (devices && devices.length > 0) {
+                    try {
+                        // Intento 1: Cámara trasera
+                        await html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, () => {});
+                    } catch (envError) {
+                        // Intento 2: Última cámara de la lista
+                        const fallbackCamera = devices[devices.length - 1].id;
+                        await html5QrCode.start(fallbackCamera, config, onScanSuccess, () => {});
                     }
-                } catch (camError) {
-                    console.error("Permiso denegado:", camError);
-                    showError("Permiso Denegado", "Debes dar permiso a la cámara cuando el navegador te lo pida.");
+                    isScanningAllowed = true;
+                    statusText.innerText = "Apuntando al QR del cliente...";
+                } else {
+                    showError("Sin Cámaras", "No se detectaron cámaras en tu dispositivo.");
                 }
-
-            } catch (error) {
-                console.error(error);
-                showError("Error de Conexión", "No se pudo conectar a la base de datos.");
+            } catch (camError) {
+                console.error("Error de cámara:", camError);
+                showError("Cámara Bloqueada", "El navegador ha bloqueado la cámara. Asegúrate de estar usando HTTPS y de dar permisos.");
             }
-        }
+        });
 
-        // Función que salta cuando lee un QR
+        // 3. Leer QR
         async function onScanSuccess(decodedText) {
             if (!isScanningAllowed) return;
-            isScanningAllowed = false; // Pausar escaneo mientras carga
+            isScanningAllowed = false; // Pausar escaneo
             
-            // Efecto visual y de sonido al leer
             if (navigator.vibrate) navigator.vibrate(200);
             statusText.innerText = "¡QR Detectado!";
             statusText.classList.remove('animate-pulse');
@@ -201,13 +193,15 @@
             }
         }
 
-        function onScanFailure(error) {
-            // Se ignora, se dispara constantemente mientras no ve un QR claro
-        }
-
-        // Buscar usuario en base de datos
+        // 4. Buscar usuario en Firestore
         async function fetchAndShowUser(uid) {
             loadingModal.classList.remove('hidden');
+            
+            if (!isFirebaseReady) {
+                // Intento final de conectar
+                try { await signInAnonymously(auth); isFirebaseReady = true; } catch(e) {}
+            }
+
             try {
                 const userRef = doc(db, 'artifacts', ligareyAppId, 'public', 'data', 'usuarios', uid);
                 const userSnap = await getDoc(userRef);
@@ -216,26 +210,23 @@
 
                 if (userSnap.exists()) {
                     const userData = userSnap.data();
-                    
-                    // Rellenar ficha
                     document.getElementById('user-photo').src = userData.photo || "https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=400&h=400&fit=crop";
                     document.getElementById('user-name').innerText = userData.name || "Desconocido";
                     document.getElementById('user-country').innerText = userData.pais || "Nación";
-                    
                     const idiomas = userData.idiomas ? userData.idiomas.join(', ') : (userData.idioma || "Idioma");
                     document.getElementById('user-lang').innerText = idiomas;
-
+                    
                     userModal.classList.remove('hidden');
                 } else {
                     showError("Usuario No Encontrado", "El perfil no existe o fue eliminado.");
                 }
             } catch (error) {
+                console.error(error);
                 loadingModal.classList.add('hidden');
-                showError("Error de Red", "Fallo al consultar la base de datos.");
+                showError("Error de Base de Datos", "No se pudo leer el perfil. Comprueba tu conexión a internet o la configuración de Firebase.");
             }
         }
 
-        // Mostrar Modal de Error
         function showError(title, msg) {
             loadingModal.classList.add('hidden');
             document.getElementById('error-title').innerText = title;
@@ -245,12 +236,10 @@
             statusText.classList.remove('animate-pulse');
         }
 
-        // Exponer función para los botones de "Siguiente" o "Reintentar"
         window.resumeScanning = function() {
             userModal.classList.add('hidden');
             errorModal.classList.add('hidden');
             
-            // Si la cámara sigue viva, reactivamos lectura
             if (html5QrCode && html5QrCode.isScanning) {
                 statusText.innerText = "Preparando...";
                 setTimeout(() => {
@@ -259,7 +248,6 @@
                     statusText.classList.add('animate-pulse');
                 }, 1000);
             } else {
-                // Si la cámara falló por completo, volvemos a la pantalla de inicio
                 startContainer.classList.remove('hidden');
                 readerContainer.classList.add('hidden');
                 statusText.classList.add('hidden');
