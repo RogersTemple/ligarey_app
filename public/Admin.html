@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LigaRey | Backoffice</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <!-- CABECERA -->
+    <header class="bg-slate-900 text-white p-4 shadow-md flex justify-between items-center z-10 shrink-0">
+        <div class="flex items-center gap-3">
+            <i data-lucide="crown" class="text-fuchsia-500 w-6 h-6"></i>
+            <h1 class="text-xl font-black uppercase tracking-tighter">LigaRey <span class="text-fuchsia-500">Admin</span></h1>
+        </div>
+        <button id="btn-logout" class="hidden flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm font-bold">
+            <i data-lucide="log-out" class="w-4 h-4"></i> Salir
+        </button>
+    </header>
+
+    <!-- PANTALLA DE LOGIN (Seguridad) -->
+    <div id="login-view" class="flex-1 flex items-center justify-center p-6 animate-in fade-in">
+        <div class="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-slate-200">
+            <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-600">
+                <i data-lucide="lock" class="w-8 h-8"></i>
+            </div>
+            <h2 class="text-2xl font-black text-center uppercase tracking-tighter mb-2">Acceso Restringido</h2>
+            <p class="text-xs text-slate-500 text-center mb-6">Inicia sesión con tu cuenta para gestionar la app.</p>
+            
+            <form id="login-form" class="space-y-4">
+                <input type="email" id="admin-email" required placeholder="Tu Email" class="w-full p-4 rounded-xl border border-slate-200 outline-none focus:border-fuchsia-500 bg-slate-50">
+                <input type="password" id="admin-pass" required placeholder="Contraseña" class="w-full p-4 rounded-xl border border-slate-200 outline-none focus:border-fuchsia-500 bg-slate-50">
+                <p id="login-error" class="text-red-500 text-xs font-bold text-center hidden"></p>
+                <button type="submit" class="w-full py-4 rounded-xl bg-slate-900 text-white font-black uppercase tracking-widest hover:bg-fuchsia-600 transition-colors">Entrar al Panel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- PANTALLA DEL DASHBOARD -->
+    <div id="dashboard-view" class="hidden flex-1 flex flex-col p-6 max-w-6xl mx-auto w-full animate-in fade-in">
+        
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div>
+                <h2 class="text-3xl font-black uppercase tracking-tighter text-slate-900">Usuarios Registrados</h2>
+                <p class="text-sm text-slate-500">Gestiona los perfiles y exporta la lista de correos.</p>
+            </div>
+            <div class="flex gap-3 w-full sm:w-auto">
+                <button id="btn-refresh" class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold shadow-sm hover:bg-slate-50 transition-all">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Actualizar
+                </button>
+                <button id="btn-export" class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold shadow-md hover:bg-emerald-600 transition-all">
+                    <i data-lucide="download" class="w-4 h-4"></i> Exportar CSV
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabla de Usuarios -->
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden flex-1 flex flex-col">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 text-slate-500 text-xs uppercase tracking-widest border-b border-slate-200">
+                            <th class="p-4 font-black">Foto</th>
+                            <th class="p-4 font-black">Nombre & Info</th>
+                            <th class="p-4 font-black">Email</th>
+                            <th class="p-4 font-black">Fecha Registro</th>
+                            <th class="p-4 font-black text-center">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body" class="divide-y divide-slate-100">
+                        <!-- Los usuarios se inyectarán aquí -->
+                        <tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">Cargando usuarios...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Estadísticas Rápidas -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                <p class="text-xs text-slate-500 uppercase font-black tracking-widest">Total Usuarios</p>
+                <p id="stat-total" class="text-3xl font-black text-fuchsia-500">0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase y Lógica -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs, doc, deleteDoc, orderBy, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCCPXwU33jrYr5nRVyTnQGWeCY_6W-FmXc",
+            authDomain: "ligarey.firebaseapp.com",
+            projectId: "ligarey",
+            storageBucket: "ligarey.firebasestorage.app",
+            messagingSenderId: "625102595981",
+            appId: "1:625102595981:web:baf09f9cda0d1b3b19ffc4"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const ligareyAppId = 'ligarey-v4';
+        
+        let allUsersData = [];
+
+        // UI Elements
+        const loginView = document.getElementById('login-view');
+        const dashboardView = document.getElementById('dashboard-view');
+        const loginForm = document.getElementById('login-form');
+        const btnLogout = document.getElementById('btn-logout');
+        const tableBody = document.getElementById('users-table-body');
+        const statTotal = document.getElementById('stat-total');
+
+        // Inicializar iconos
+        lucide.createIcons();
+
+        // Control de Sesión
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                loginView.classList.add('hidden');
+                dashboardView.classList.remove('hidden');
+                btnLogout.classList.remove('hidden');
+                fetchUsers();
+            } else {
+                loginView.classList.remove('hidden');
+                dashboardView.classList.add('hidden');
+                btnLogout.classList.add('hidden');
+            }
+        });
+
+        // Login
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('admin-email').value;
+            const pass = document.getElementById('admin-pass').value;
+            const errEl = document.getElementById('login-error');
+            
+            try {
+                await signInWithEmailAndPassword(auth, email, pass);
+                errEl.classList.add('hidden');
+            } catch (error) {
+                errEl.innerText = "Credenciales incorrectas o sin permisos.";
+                errEl.classList.remove('hidden');
+            }
+        });
+
+        // Logout
+        btnLogout.addEventListener('click', () => signOut(auth));
+        document.getElementById('btn-refresh').addEventListener('click', fetchUsers);
+
+        // Cargar Usuarios
+        async function fetchUsers() {
+            tableBody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2"></i> Cargando...</td></tr>';
+            lucide.createIcons();
+            
+            try {
+                const usersRef = collection(db, 'artifacts', ligareyAppId, 'public', 'data', 'usuarios');
+                const snapshot = await getDocs(usersRef);
+                
+                allUsersData = [];
+                snapshot.forEach(doc => {
+                    allUsersData.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Ordenar por fecha de registro (más recientes primero)
+                allUsersData.sort((a, b) => new Date(b.fechaRegistro || 0) - new Date(a.fechaRegistro || 0));
+                
+                renderTable();
+                statTotal.innerText = allUsersData.length;
+
+            } catch (error) {
+                console.error(error);
+                tableBody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-red-500 font-bold">Error al cargar los datos. Revisa los permisos de Firebase.</td></tr>';
+            }
+        }
+
+        // Mostrar tabla
+        function renderTable() {
+            if (allUsersData.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No hay usuarios registrados aún.</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = allUsersData.map(user => {
+                const date = user.fechaRegistro ? new Date(user.fechaRegistro).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
+                const photoUrl = user.photo || 'https://images.unsplash.com/photo-1544502062-f82887f03d1c?w=100&h=100&fit=crop';
+                const idiomasStr = user.idiomas ? user.idiomas.join(', ') : (user.idioma || '-');
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors group">
+                        <td class="p-4">
+                            <img src="${photoUrl}" alt="Foto" class="w-12 h-12 rounded-full object-cover border-2 border-slate-200">
+                        </td>
+                        <td class="p-4">
+                            <p class="font-black text-slate-900 text-sm">${user.name || 'Sin nombre'}</p>
+                            <div class="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <span class="flex items-center gap-1"><i data-lucide="map-pin" class="w-3 h-3"></i> ${user.pais || '-'}</span>
+                                <span class="flex items-center gap-1"><i data-lucide="mic" class="w-3 h-3"></i> ${idiomasStr}</span>
+                            </div>
+                        </td>
+                        <td class="p-4">
+                            <p class="text-sm text-slate-700 font-medium">${user.email || 'Sin email'}</p>
+                            ${user.newsletterAccepted ? '<span class="inline-block mt-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded uppercase">Acepta Correos</span>' : ''}
+                        </td>
+                        <td class="p-4 text-sm text-slate-500">${date}</td>
+                        <td class="p-4 text-center">
+                            <button onclick="deleteUserRow('${user.id}', '${user.name || 'Usuario'}')" class="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all" title="Borrar Perfil">
+                                <i data-lucide="trash-2" class="w-5 h-5 pointer-events-none"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            
+            lucide.createIcons();
+        }
+
+        // Borrar Usuario (Se expone al window para que el onclick del HTML funcione)
+        window.deleteUserRow = async (userId, userName) => {
+            const confirmed = confirm(`ATENCIÓN: ¿Estás seguro de que quieres borrar el perfil de "${userName}"?\n\nEsto lo eliminará de La Pista y de los chats de la aplicación inmediatamente.`);
+            
+            if (confirmed) {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', ligareyAppId, 'public', 'data', 'usuarios', userId));
+                    alert("Perfil borrado correctamente.");
+                    fetchUsers(); // Recargar la tabla
+                } catch (error) {
+                    console.error(error);
+                    alert("Error al borrar el perfil. Inténtalo de nuevo.");
+                }
+            }
+        };
+
+        // Exportar a CSV (Excel)
+        document.getElementById('btn-export').addEventListener('click', () => {
+            if (allUsersData.length === 0) {
+                alert("No hay datos para exportar.");
+                return;
+            }
+
+            // Crear cabeceras del CSV
+            let csvContent = "Nombre,Email,País,Idiomas,Acepta Newsletter,Fecha de Registro\n";
+
+            // Añadir datos de cada usuario
+            allUsersData.forEach(u => {
+                const name = `"${(u.name || '').replace(/"/g, '""')}"`;
+                const email = `"${(u.email || '').replace(/"/g, '""')}"`;
+                const pais = `"${(u.pais || '').replace(/"/g, '""')}"`;
+                const idiomas = `"${(u.idiomas ? u.idiomas.join(', ') : (u.idioma || '')).replace(/"/g, '""')}"`;
+                const news = u.newsletterAccepted ? "SI" : "NO";
+                const date = u.fechaRegistro || "";
+
+                csvContent += `${name},${email},${pais},${idiomas},${news},${date}\n`;
+            });
+
+            // Descargar el archivo
+            const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); // \uFEFF fuerza UTF-8 en Excel
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            
+            link.setAttribute("href", url);
+            link.setAttribute("download", `LigaRey_Usuarios_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+    </script>
+</body>
+</html>
