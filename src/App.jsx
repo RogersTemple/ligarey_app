@@ -193,36 +193,32 @@ export default function App() {
   const [showInspector, setShowInspector] = useState(null); 
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [otherIsTyping, setOtherIsTyping] = useState(false);
 
+  // Refs de control
   const sessionStart = useRef(new Date().toISOString());
   const notifiedIds = useRef(new Set());
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null); 
+  const typingTimeoutRef = useRef(null);
 
+  // Rutas de Firestore
   const usersCol = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
   const matchesCol = collection(db, 'artifacts', appId, 'public', 'data', 'matches');
   const chatsCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats');
+  const typingCol = collection(db, 'artifacts', appId, 'public', 'data', 'typing');
 
   // Traducción Dinámica
   const lang = myProfile?.appLanguage || 'es';
   const t = (key) => T[lang]?.[key] || T['es'][key] || key;
 
-  // --- NUEVA FUNCIÓN: Notificaciones Nativas del Sistema ---
-  const showNativeNotification = (title, body) => {
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted') {
-      try {
-        new Notification(title, { body: body, icon: DEFAULT_AVATAR });
-      } catch (e) {
-        console.error("Error mostrando notificación nativa", e);
-      }
-    }
-  };
-
-  // Auto-scroll
+  // Auto-scroll en el chat
   useEffect(() => {
-    if (chatEndRef.current) { chatEndRef.current.scrollIntoView({ behavior: "smooth" }); }
-  }, [chatMessages, view]);
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, view, otherIsTyping]);
 
   // --- ARRANQUE Y AUTENTICACIÓN ---
   useEffect(() => {
@@ -366,7 +362,37 @@ export default function App() {
     return () => unsubChat();
   }, [user, activeChatUser]);
 
+  // --- ESCUCHAR SI EL OTRO ESCRIBE ---
+  useEffect(() => {
+    if (!user || !activeChatUser) {
+      setOtherIsTyping(false);
+      return;
+    }
+    const unsubTyping = onSnapshot(doc(typingCol, activeChatUser.id), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().typingTo === user.uid) {
+        setOtherIsTyping(true);
+      } else {
+        setOtherIsTyping(false);
+      }
+    });
+    return () => unsubTyping();
+  }, [user, activeChatUser]);
+
   // --- FUNCIONES DE AUTH Y PERFIL ---
+  const handleTypingChange = (e) => {
+    setNewMessageText(e.target.value);
+    if (!user || !activeChatUser) return;
+
+    // Escribir en Firestore que estamos tecleando
+    setDoc(doc(typingCol, user.uid), { typingTo: activeChatUser.id, timestamp: new Date().toISOString() });
+
+    // Limpiar el estado de tecleando después de 2 segundos de inactividad
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      setDoc(doc(typingCol, user.uid), { typingTo: null }, { merge: true });
+    }, 2000);
+  };
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -869,20 +895,46 @@ export default function App() {
                 </div>
                 <button onClick={() => deleteConversation(activeChatUser.id)} className="p-2 text-stone-300 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
               </div>
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-white/50 min-h-0">
-                {chatMessages.map((m) => (
-                  <div key={m.id} className={`flex ${m.from === user.uid ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-4 rounded-3xl max-w-[80%] text-sm font-medium shadow-sm ${m.from === user.uid ? 'bg-rose-500 text-white rounded-tr-none' : 'bg-white text-stone-700 rounded-tl-none border border-stone-100'}`}>{m.text}</div>
+              
+              <div 
+                className="flex-1 p-4 overflow-y-auto space-y-4 bg-stone-50 min-h-0 relative"
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23f43f5e' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` }}
+              >
+                {chatMessages.map((m) => {
+                  const isMe = m.from === user.uid;
+                  return (
+                    <div key={m.id} className={`flex gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      {!isMe && <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover shrink-0 mt-auto shadow-sm" />}
+                      <div className={`p-4 rounded-3xl max-w-[75%] text-sm font-medium shadow-sm ${isMe ? 'bg-rose-500 text-white rounded-br-none' : 'bg-white text-stone-700 rounded-bl-none border border-stone-100'}`}>
+                        {m.text}
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                {/* INDICADOR DE QUE EL OTRO ESTÁ ESCRIBIENDO */}
+                {otherIsTyping && (
+                  <div className="flex gap-2 justify-start animate-in fade-in slide-in-from-bottom-2">
+                    <img src={activeChatUser.photo || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover shrink-0 mt-auto shadow-sm" />
+                    <div className="p-4 rounded-3xl bg-white text-stone-700 rounded-bl-none border border-stone-100 shadow-sm flex items-center gap-1.5 h-[52px]">
+                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
                   </div>
-                ))}
+                )}
+
                 <div ref={chatEndRef} />
               </div>
               <form onSubmit={(e) => {
                 e.preventDefault(); if (!newMessageText.trim()) return;
                 addDoc(chatsCol, { from: user.uid, fromName: myProfile.name, to: activeChatUser.id, text: newMessageText, timestamp: new Date().toISOString() });
                 setNewMessageText('');
+                // Limpiamos el estado de tecleando al enviar
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                setDoc(doc(typingCol, user.uid), { typingTo: null }, { merge: true });
               }} className="p-4 bg-white border-t flex gap-2 shrink-0">
-                <input value={newMessageText} onChange={e => setNewMessageText(e.target.value)} placeholder={t('write')} className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
+                <input value={newMessageText} onChange={handleTypingChange} placeholder={t('write')} className="flex-1 bg-stone-100 rounded-full px-6 py-3 outline-none focus:bg-white border-transparent focus:border-rose-100 transition-all shadow-inner" />
                 <button type="submit" className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg"><Send className="w-5 h-5 ml-1" /></button>
               </form>
             </div>
