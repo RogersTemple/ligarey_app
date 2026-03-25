@@ -61,6 +61,11 @@ const IDIOMAS = [
   "Español", "Inglés", "Italiano", "Francés", "Alemán", "Portugués", "Otro"
 ];
 
+const PERFILES_MOCK = [
+  { id: 'm1', name: 'Lucía (Ejemplo)', photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=500&fit=crop', phrase: 'Viviendo el momento ✨', lookingFor: 'Gente para el escenario principal', interests: ['Rock', 'Cerveza fría'], pais: 'España', idiomas: ['Español', 'Inglés'] },
+  { id: 'm2', name: 'Carlos (Ejemplo)', photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=500&fit=crop', phrase: 'Rock & Roll en vena 🤘', lookingFor: 'Compañero de pogos', interests: ['Metal', 'Pogo'], pais: 'Argentina', idiomas: ['Español'] }
+];
+
 // --- DICCIONARIO DE TRADUCCIONES ---
 const T = {
   es: {
@@ -80,10 +85,10 @@ const T = {
     wrote_you: "te escribió", greeted_you: "te saludó", empty_history: "Historial vacío",
     settings: "Ajustes VIP", notifications: "Notificaciones", notif_desc: "Avisos y mensajes",
     del_account: "Borrar mi Cuenta", del_title: "¿Eliminar cuenta?", del_desc: "Tu cuenta desaparecerá para siempre.",
-    yes_del: "SÍ, ELIMINAR", cancel: "CANCELAR", qr_title: "Descuento Rey", qr_desc: "Muestra en barra principal",
+    yes_del: "SÍ, ELIMINAR", cancel: "CANCELAR", qr_title: "Descuento Rey", qr_desc: "Muestra en barra principal", qr_explanation: "Presenta este código QR en la barra principal para obtener 1€ de descuento en cada una de tus bebidas toda la noche.",
     toast_vip: "Aviso VIP", close_tab: "Cerrar Ficha", loading: "CARGANDO...", unknown: "Desconocido",
     err_name: "El nombre es obligatorio.", err_photo: "Debes subir una foto de perfil.",
-    err_nation: "Selecciona tu país de origen.", err_spoken: "Selecciona el idioma que hablas.",
+    err_nation: "Selecciona tu país de origen.", err_spoken: "Selecciona al menos un idioma.",
     err_phrase: "Escribe tu frase favorita.", err_looking: "Dinos qué buscas en el festival.",
     err_terms: "Debes aceptar la privacidad y normas de conducta para registrarte.",
     err_auth_in_use: "Este email ya está en uso.", err_auth_weak: "La contraseña debe tener al menos 6 caracteres.",
@@ -107,10 +112,10 @@ const T = {
     wrote_you: "wrote to you", greeted_you: "greeted you", empty_history: "Empty history",
     settings: "VIP Settings", notifications: "Notifications", notif_desc: "Alerts and messages",
     del_account: "Delete my Account", del_title: "Delete account?", del_desc: "Your account will disappear forever.",
-    yes_del: "YES, DELETE", cancel: "CANCEL", qr_title: "King Discount", qr_desc: "Show at the main bar",
+    yes_del: "YES, DELETE", cancel: "CANCEL", qr_title: "King Discount", qr_desc: "Show at the main bar", qr_explanation: "Show this QR code at the main bar to get €1 off every drink all night long.",
     toast_vip: "VIP Alert", close_tab: "Close Card", loading: "LOADING...", unknown: "Unknown",
     err_name: "Name is required.", err_photo: "You must upload a profile photo.",
-    err_nation: "Select your country of origin.", err_spoken: "Select the language you speak.",
+    err_nation: "Select your country of origin.", err_spoken: "Select at least one language.",
     err_phrase: "Write your favorite phrase.", err_looking: "Tell us what you're looking for.",
     err_terms: "You must accept the privacy policy and rules to register.",
     err_auth_in_use: "This email is already in use.", err_auth_weak: "Password must be at least 6 characters.",
@@ -134,10 +139,10 @@ const T = {
     wrote_you: "ti ha scritto", greeted_you: "ti ha salutato", empty_history: "Cronologia vuota",
     settings: "Impostazioni VIP", notifications: "Notifiche", notif_desc: "Avvisi e messaggi",
     del_account: "Elimina Account", del_title: "Eliminare account?", del_desc: "Il tuo account scomparirà per sempre.",
-    yes_del: "SÌ, ELIMINA", cancel: "ANNULLA", qr_title: "Sconto Rey", qr_desc: "Mostra al bar principale",
+    yes_del: "SÌ, ELIMINA", cancel: "ANNULLA", qr_title: "Sconto Rey", qr_desc: "Mostra al bar principale", qr_explanation: "Mostra questo codice QR al bar principale per ottenere 1€ di sconto su ogni drink per tutta la notte.",
     toast_vip: "Avviso VIP", close_tab: "Chiudi Scheda", loading: "CARICAMENTO...", unknown: "Sconosciuto",
     err_name: "Il nome è obbligatorio.", err_photo: "Devi caricare una foto del profilo.",
-    err_nation: "Seleziona la tua nazione.", err_spoken: "Seleziona la lingua che parli.",
+    err_nation: "Seleziona la tua nazione.", err_spoken: "Seleziona almeno una lingua.",
     err_phrase: "Scrivi la tua frase preferita.", err_looking: "Dicci cosa cerchi nel festival.",
     err_terms: "Devi accettare privacy e regole per registrarti.",
     err_auth_in_use: "Questa email è già in uso.", err_auth_weak: "La password deve avere almeno 6 caratteri.",
@@ -162,7 +167,7 @@ export default function App() {
   // Perfil y Ajustes (Añadido appLanguage)
   const [myProfile, setMyProfile] = useState({ 
     name: '', photo: null, phrase: '', lookingFor: '', interests: [], 
-    pais: '', idioma: '', appLanguage: 'es', 
+    pais: '', idiomas: [], appLanguage: 'es', 
     notificationsEnabled: true 
   });
   
@@ -237,10 +242,11 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
-            setMyProfile(prev => ({ ...prev, ...data }));
+            const loadedIdiomas = data.idiomas || (data.idioma ? [data.idioma] : []);
+            setMyProfile(prev => ({ ...prev, ...data, idiomas: loadedIdiomas }));
             
             // Bloqueo si el perfil es incompleto
-            if (!data.name || !data.photo || !data.phrase || !data.lookingFor || !data.pais || !data.idioma) {
+            if (!data.name || !data.photo || !data.phrase || !data.lookingFor || !data.pais || loadedIdiomas.length === 0) {
               setView('register');
             } else if (view === 'welcome' || view === 'auth') {
               setView('discover');
@@ -327,7 +333,9 @@ export default function App() {
         const list = [];
         usersSnap.forEach(d => { 
           if (d.id !== user.uid && d.data().name && d.data().photo) {
-            list.push({ id: d.id, ...d.data(), isAlreadyMatched: matchedSet.has(d.id) }); 
+            const uData = d.data();
+            const uIdiomas = uData.idiomas || (uData.idioma ? [uData.idioma] : []);
+            list.push({ id: d.id, ...uData, idiomas: uIdiomas, isAlreadyMatched: matchedSet.has(d.id) }); 
           }
         });
         
@@ -424,7 +432,7 @@ export default function App() {
     if (!myProfile.name?.trim()) { setPhotoError(t('err_name')); return false; }
     if (!myProfile.photo) { setPhotoError(t('err_photo')); return false; }
     if (!myProfile.pais?.trim()) { setPhotoError(t('err_nation')); return false; }
-    if (!myProfile.idioma?.trim()) { setPhotoError(t('err_spoken')); return false; }
+    if (!myProfile.idiomas || myProfile.idiomas.length === 0) { setPhotoError(t('err_spoken')); return false; }
     if (!myProfile.phrase?.trim()) { setPhotoError(t('err_phrase')); return false; }
     if (!myProfile.lookingFor?.trim()) { setPhotoError(t('err_looking')); return false; }
 
@@ -471,7 +479,7 @@ export default function App() {
   const handleLogout = async () => {
     await signOut(auth);
     setUser(null);
-    setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [], pais: '', idioma: '', appLanguage: 'es', notificationsEnabled: true });
+    setMyProfile({ name: '', photo: null, phrase: '', lookingFor: '', interests: [], pais: '', idiomas: [], appLanguage: 'es', notificationsEnabled: true });
     setShowSettings(false);
     setView('welcome');
   };
@@ -550,12 +558,12 @@ export default function App() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
             <div className="absolute bottom-0 p-8 text-white w-full">
               <h2 className="text-4xl font-black tracking-tighter mb-2 leading-none">{showInspector.name}</h2>
-              <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
-                <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {showInspector.pais || t('unknown')}</div>
-                <span className="opacity-40">•</span>
-                <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {showInspector.idioma || t('unknown')}</div>
-              </div>
-              <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
+          <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
+            <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {showInspector.pais || t('unknown')}</div>
+            <span className="opacity-40">•</span>
+            <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {showInspector.idiomas?.join(', ') || t('unknown')}</div>
+          </div>
+          <p className="text-rose-300 font-bold mb-2 italic">"{showInspector.phrase || '¡Hola!'}"</p>
               <div className="bg-white/10 rounded-2xl p-4 mb-4"><p className="text-[10px] font-black uppercase mb-1 opacity-60">{t('looking_for')}</p><p className="text-sm font-medium">{showInspector.lookingFor}</p></div>
               <div className="flex flex-wrap gap-2">{(showInspector.interests || []).map((i, idx) => <span key={idx} className="px-3 py-1 bg-white/20 rounded-full text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
             </div>
@@ -720,27 +728,24 @@ export default function App() {
 
                   <input type="text" placeholder={t('name_req')} value={myProfile.name} onChange={e => setMyProfile({...myProfile, name: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm" />
                   
-                  <div className="flex flex-col gap-3">
-                    {/* Selector País y Lenguaje Hablado */}
-                    <div className="flex gap-2">
-                      <select value={myProfile.pais} onChange={e => setMyProfile({...myProfile, pais: e.target.value})} className="w-1/2 p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm bg-white text-stone-600 text-sm">
-                        <option value="">{t('nation')}</option>
-                        {PAISES.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                      <select value={myProfile.idioma} onChange={e => setMyProfile({...myProfile, idioma: e.target.value})} className="w-1/2 p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm bg-white text-stone-600 text-sm">
-                        <option value="">{t('spoken_lang')}</option>
-                        {IDIOMAS.map(i => <option key={i} value={i}>{i}</option>)}
-                      </select>
-                    </div>
-
-                    {/* Selector de Interfaz integrado en el registro */}
-                    <div className="flex items-center justify-between p-4 rounded-2xl border border-stone-200 bg-white shadow-sm">
-                      <p className="text-[10px] font-black text-stone-500 uppercase tracking-widest">{t('app_language')}</p>
-                      <select value={myProfile.appLanguage} onChange={e => changeAppLanguage(e.target.value)} className="bg-transparent text-stone-800 text-xs font-bold outline-none">
-                        <option value="es">Español</option>
-                        <option value="en">English</option>
-                        <option value="it">Italiano</option>
-                      </select>
+                  <div className="flex flex-col gap-4">
+                    <select value={myProfile.pais} onChange={e => setMyProfile({...myProfile, pais: e.target.value})} className="w-full p-4 rounded-2xl border border-stone-200 outline-none focus:border-rose-400 shadow-sm bg-white text-stone-600 text-sm">
+                      <option value="">{t('nation')}</option>
+                      {PAISES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-black text-stone-500 uppercase tracking-widest px-2">{t('spoken_lang')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {IDIOMAS.map(lang => (
+                          <button key={lang} type="button" onClick={() => {
+                            const list = (myProfile.idiomas || []).includes(lang) 
+                              ? myProfile.idiomas.filter(i => i !== lang) 
+                              : [...(myProfile.idiomas || []), lang];
+                            setMyProfile({...myProfile, idiomas: list});
+                          }} className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${(myProfile.idiomas || []).includes(lang) ? 'bg-rose-500 border-rose-500 text-white shadow-md' : 'bg-white text-stone-500 hover:bg-stone-50'}`}>{lang}</button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -765,15 +770,15 @@ export default function App() {
                   {myProfile.photo && <img src={myProfile.photo} className="absolute inset-0 w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                   <div className="absolute bottom-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-black mb-1 leading-none">{myProfile.name}</h2>
-                    
-                    <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
-                      <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {myProfile.pais || t('unknown')}</div>
-                      <span className="opacity-40">•</span>
-                      <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {myProfile.idioma || t('unknown')}</div>
-                    </div>
+                <h2 className="text-3xl font-black mb-1 leading-none">{myProfile.name || 'Sin nombre'}</h2>
+                
+                <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
+                  <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {myProfile.pais || t('unknown')}</div>
+                  <span className="opacity-40">•</span>
+                  <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {myProfile.idiomas?.join(', ') || t('unknown')}</div>
+                </div>
 
-                    <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p>
+                <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{myProfile.phrase}"</p>
                     <p className="text-white/60 text-[10px] uppercase font-black tracking-widest mb-3 leading-none">{t('looking_for')} {myProfile.lookingFor}</p>
                     <div className="flex flex-wrap gap-2">{(myProfile.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[9px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                   </div>
@@ -807,14 +812,14 @@ export default function App() {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                     <div className="absolute bottom-0 p-6 text-white w-full">
                       <div className="flex items-center gap-2 mb-1"><h2 className="text-4xl font-black tracking-tighter leading-none">{profiles[currentIndex]?.name}</h2>{profiles[currentIndex]?.isAlreadyMatched && <MessageCircle className="w-5 h-5 text-emerald-400" />}</div>
-                      
-                      <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
-                        <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {profiles[currentIndex]?.pais || t('unknown')}</div>
-                        <span className="opacity-40">•</span>
-                        <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {profiles[currentIndex]?.idioma || t('unknown')}</div>
-                      </div>
+                  
+                  <div className="flex items-center gap-3 mb-3 text-[10px] uppercase font-black tracking-widest text-rose-200">
+                    <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {profiles[currentIndex]?.pais || t('unknown')}</div>
+                    <span className="opacity-40">•</span>
+                    <div className="flex items-center gap-1"><Mic className="w-3 h-3" /> {profiles[currentIndex]?.idiomas?.join(', ') || t('unknown')}</div>
+                  </div>
 
-                      <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase}"</p>
+                  <p className="text-rose-300 font-bold mb-1 italic leading-tight">"{profiles[currentIndex]?.phrase}"</p>
                       <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-2 leading-none">{t('looking_for')} {profiles[currentIndex]?.lookingFor}</p>
                       <div className="flex flex-wrap gap-2">{(profiles[currentIndex]?.interests || []).map((i, idx) => <span key={idx} className="px-2 py-1 bg-white/20 rounded text-[10px] uppercase font-bold tracking-widest">{i}</span>)}</div>
                     </div>
@@ -930,7 +935,8 @@ export default function App() {
           <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
             <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center relative shadow-2xl animate-in zoom-in">
               <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 text-stone-300 hover:text-stone-800 transition-colors"><X className="w-6 h-6" /></button>
-              <h3 className="text-2xl font-black text-stone-800 mb-4 tracking-tighter uppercase font-black leading-none">{t('qr_title')}</h3>
+              <h3 className="text-2xl font-black text-stone-800 mb-2 tracking-tighter uppercase font-black leading-none">{t('qr_title')}</h3>
+              <p className="text-sm text-stone-600 mb-6 leading-tight">{t('qr_explanation')}</p>
               <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LIGAREY-${user?.uid}`} alt="QR" className="w-48 h-48 mix-blend-multiply mx-auto mb-4" />
               <p className="text-[10px] text-stone-500 uppercase font-black tracking-widest opacity-60 leading-none">{t('qr_desc')}</p>
             </div>
