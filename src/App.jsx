@@ -816,7 +816,12 @@ export default function App() {
 
           {/* DISCOVER (LA PISTA) */}
           {view === 'discover' && (
-            <div className="h-full flex flex-col p-4 bg-stone-100 relative animate-in fade-in">
+            <div 
+              className="h-full flex flex-col p-4 bg-rose-50 relative animate-in fade-in"
+              style={{ 
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23f43f5e' fill-opacity='0.05'%3E%3Cg transform='translate(10, 10) scale(1.2)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3Cg transform='translate(45, 45) scale(1.2) rotate(20 12 12)'%3E%3Cpath d='m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7Zm3 16h14'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` 
+              }}
+            >
               {showMatchAnimation && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/90 backdrop-blur-md">
                   <div className="text-center animate-in zoom-in">
